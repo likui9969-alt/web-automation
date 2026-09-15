@@ -9,7 +9,7 @@
 |------|------|----------|------|
 | M0 需求分析与测试设计 | IN_PROGRESS | 2026-09-15 | 设计输出已完成（PLAN.md、测试金字塔、架构草案）。**登录模块作业已由 Builder 代执行完成**（[homework/M0_登录模块作业.md](homework/M0_登录模块作业.md)，15 条测试点全部实测）。剩余：PIM/Leave/Recruitment 测试点清单。全部完成后转入 WAITING_FOR_REVIEW。 |
 | M1 环境搭建 + 裸登录脚本 | APPROVED | 2026-09-15 | Review 85/100 后 P1/P2 全部闭环：P2×2 已修复（README）；P1 git 已解决（见验证记录 2026-09-15 P1 修复行）。**M1 正式关闭，进入 M2** |
-| M2–M11 | 未开始 | — | 按 PLAN.md §2 顺序执行，Review 门禁控制 |
+| M2 Fixture + 参数化 | WAITING_FOR_REVIEW | 2026-09-15 | **实现完成并实测**：conftest.py 三层 fixture（playwright/browser= session，page=context 级隔离）+ HEADLESS 配置化 + login_page 导航 fixture + 错误凭证参数化（3 组，复用 M0 防枚举实测结论）。`git mv` 保留裸版历史（c93f61e 可对照）。**实测 5 passed in 36.32s**（对比分析见验证记录）。待 Reviewer 审查 |
 
 ## 验证记录
 
@@ -30,6 +30,8 @@
 | 2026-09-15 | M1 | **Reviewer 独立复跑**（Review 环节） | Reviewer 亲自执行 `pytest -m ui`（非采信 Builder 自述）：**3 passed in 29.78s，退出码 0**。与 Builder 记录的 35.29s 均通过，~18% 时间差佐证"每用例自建浏览器 + 公网 Demo 站"固有波动，基线可信 |
 | 2026-09-15 | M1 | P2 修复（Review 后 Builder 执行） | P2-2：README 状态节更新为实测事实（3 passed 双次运行）；P2-1：README 快速开始补国内镜像 + `PLAYWRIGHT_BROWSERS_PATH` 前置条件（PowerShell 可复现步骤）。P1-1（git 安装 + init）待项目所有者配合，未完成，M1 维持 NEEDS_FIX |
 | 2026-09-15 | M1 | **P1 修复：git 仓库初始化 + 首次提交** | 实测发现：git 2.55.0 **早已装于 `D:\应用\git\Git`，仅未进 PATH**（winget 亦确认已安装，升级因 UAC 无人值守跳过，不影响使用）。`git init -b main` + 按名 add 15 项 + 首次提交 `c93f61e`，退出码 0，工作区干净（`.venv/`、`.playwright-browsers/`、`chromedriver.exe` 均被 .gitignore 正确排除；chromedriver 为 Selenium 时代残留已补 ignore）。M1 P1 闭环 → APPROVED |
+| 2026-09-15 | M2 | **Fixture 重构后实测（含 M1 基线对照）** | `pytest -m ui`：**5 passed in 36.32s，退出码 0**（正向 1 + 错误凭证参数化 3 + 空表单 1）。对照 M1：3 用例 35.29s（均摊 ~11.8s/例）→ 5 用例 36.32s（均摊 ~7.3s/例），**用例数 +67% 总时长持平，单例均摊降 ~38%**。诚实结论：大头仍是公网页面加载与网络往返，浏览器共享只省 ~2s/例——优化收益取决于瓶颈构成（面试点） |
+| 2026-09-15 | M2 | 参数化用例生效验证 | pytest 输出显示参数 ID 完整展开：`[Admin-wrongpass123]`、`[nosuchuser-admin123]`、`[nosuchuser-wrongpass123]` 三组独立执行且全部 PASSED——错误用户名场景（M0 实测防枚举：统一 Invalid credentials）首次进入自动化回归 |
 
 ## M1 自评总结（Builder）
 
