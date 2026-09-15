@@ -8,7 +8,7 @@
 | 模块 | 状态 | 更新时间 | 说明 |
 |------|------|----------|------|
 | M0 需求分析与测试设计 | IN_PROGRESS | 2026-09-15 | 设计输出已完成（PLAN.md、测试金字塔、架构草案）。**登录模块作业已由 Builder 代执行完成**（[homework/M0_登录模块作业.md](homework/M0_登录模块作业.md)，15 条测试点全部实测）。剩余：PIM/Leave/Recruitment 测试点清单。全部完成后转入 WAITING_FOR_REVIEW。 |
-| M1 环境搭建 + 裸登录脚本 | NEEDS_FIX | 2026-09-15 | Review 完成（85/100）：核心目标全部达成且 Reviewer 复跑通过（3 passed in 29.78s）。**P1×1：git 未安装/仓库未初始化**（版本控制缺失，M2 重构无回滚能力）+ P2×2（README 快速开始不可复现、状态节过期）。详见 [REVIEW_FEEDBACK.md](REVIEW_FEEDBACK.md)。P1 需项目所有者安装 git 后由 Builder 完成初始化提交 |
+| M1 环境搭建 + 裸登录脚本 | APPROVED | 2026-09-15 | Review 85/100 后 P1/P2 全部闭环：P2×2 已修复（README）；P1 git 已解决（见验证记录 2026-09-15 P1 修复行）。**M1 正式关闭，进入 M2** |
 | M2–M11 | 未开始 | — | 按 PLAN.md §2 顺序执行，Review 门禁控制 |
 
 ## 验证记录
@@ -29,6 +29,7 @@
 | 2026-09-15 | M1 | **第一批 UI 测试实际运行** | `pytest -m ui`：**3 passed in 35.29s，退出码 0**。用例：test_login_valid_credentials（断言跳转 /dashboard/index）、test_login_wrong_password（断言 "Invalid credentials" 可见 + URL 未跳转）、test_login_empty_fields（断言 2 处 "Required"）。等待策略全部基于 expect 自动轮询，无任何固定 sleep。35.29s/3 用例即"每用例自建浏览器"的代价，M2 fixture 重构的对照基线 |
 | 2026-09-15 | M1 | **Reviewer 独立复跑**（Review 环节） | Reviewer 亲自执行 `pytest -m ui`（非采信 Builder 自述）：**3 passed in 29.78s，退出码 0**。与 Builder 记录的 35.29s 均通过，~18% 时间差佐证"每用例自建浏览器 + 公网 Demo 站"固有波动，基线可信 |
 | 2026-09-15 | M1 | P2 修复（Review 后 Builder 执行） | P2-2：README 状态节更新为实测事实（3 passed 双次运行）；P2-1：README 快速开始补国内镜像 + `PLAYWRIGHT_BROWSERS_PATH` 前置条件（PowerShell 可复现步骤）。P1-1（git 安装 + init）待项目所有者配合，未完成，M1 维持 NEEDS_FIX |
+| 2026-09-15 | M1 | **P1 修复：git 仓库初始化 + 首次提交** | 实测发现：git 2.55.0 **早已装于 `D:\应用\git\Git`，仅未进 PATH**（winget 亦确认已安装，升级因 UAC 无人值守跳过，不影响使用）。`git init -b main` + 按名 add 15 项 + 首次提交 `c93f61e`，退出码 0，工作区干净（`.venv/`、`.playwright-browsers/`、`chromedriver.exe` 均被 .gitignore 正确排除；chromedriver 为 Selenium 时代残留已补 ignore）。M1 P1 闭环 → APPROVED |
 
 ## M1 自评总结（Builder）
 
