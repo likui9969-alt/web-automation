@@ -1,0 +1,7 @@
+# 为什么需要 requirements.txt：
+# 锁定依赖清单，保证任何机器（本机 / CI / Docker）执行
+# `pip install -r requirements.txt` 后得到一致的环境。
+# 引入原则：每个模块用到才加，不提前堆。
+
+pytest>=8.0
+playwright>=1.40

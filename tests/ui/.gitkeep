@@ -1,0 +1,4 @@
+# tests/ — 测试入口。为什么按层分目录：
+# M9 CI 需要"先跑快的 API、再跑慢的 UI"分层执行与失败反馈，
+# 目录即 marker 的物理对应（tests/ui ↔ -m ui，tests/api ↔ -m api）。
+# 空目录 git 不跟踪，本文件仅作占位。M1 起此目录放入第一个 UI 测试。

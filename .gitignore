@@ -1,0 +1,29 @@
+# .gitignore — 为什么需要：
+# 1. 产物不入库：报告、截图、trace 是每次运行的输出，入库只会污染历史
+# 2. 本地环境不入库：虚拟环境、缓存因机器而异
+# 3. 敏感信息不入库：未来若引入真实环境凭证（.env），必须屏蔽
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# 测试产物（M7/M8 生成）
+reports/
+screenshots/
+traces/
+allure-results/
+
+# Playwright 浏览器二进制（约 300MB，安装脚本按需下载，绝不入库）
+.playwright-browsers/
+
+# 工具二进制不入库（chromedriver 为 Selenium 时代残留，本项目用 Playwright 不需要）
+chromedriver.exe
+
+# 本地环境配置（真实凭证走环境变量，不入库）
+.env
+
+# IDE
+.idea/
