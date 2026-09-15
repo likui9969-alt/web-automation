@@ -12,6 +12,7 @@
 | M2 Fixture + 参数化 | APPROVED | 2026-09-15 | Review：**APPROVED_WITH_FIXES → 修复后 APPROVED**。正确项：三层 fixture scope 决策、yield teardown、参数化有 M0 依据、性能归因诚实。P2-1（data/ 承诺未兑现）已修复：参数组外置 `data/credentials.py`，修复后复跑 5 passed in 47.18s。P3×3 记录在 [REVIEW_FEEDBACK.md](REVIEW_FEEDBACK.md) 不阻塞 |
 | M3 POM | APPROVED | 2026-09-15 | pages/login_page.py 激活 POM：定位器 7→0 处散落、URL/操作语义收编、断言分层取舍有注释。**过程中遭遇真实 flaky**：公网过载致 goto 随机超时（同代码 5P 与 3P+2E 并存），经 wait_until=domcontentloaded + 超时 20s 校准双修复后稳定 5 passed。全程排障记录见验证记录（面试黄金素材） |
 | M4 API 层 | APPROVED | 2026-09-15 | **六轮探测证伪链**（表单无 token→JSON 405→UA 无效→Playwright 网络监听抓真相）：登录=Vue 壳 `<auth-login :token>` 提取 + POST /auth/validate；API 真实路径含 /web/index.php 前缀（M0 抓包漏记）。api/client.py + api/pim.py 语义封装，**API 层 5 passed in 14.34s（vs UI 同规模 43.24s，3 倍速差=金字塔实测证据）**。全量 10 passed in 65.40s；conftest setdefault 彻底修复浏览器路径依赖（M1 P2-1 终闭环）。**Review APPROVED_WITH_FIXES → P2-1（PIMApi base_url 一致性）修复后复跑 5 passed 16.57s → APPROVED 终态，M4 关闭** |
+| M5 UI+API 混合造数 | APPROVED | 2026-09-15 | 数据工厂（utils/factory.py 唯一命名）+ api/pim.py 增 create/delete/search_by_name（探测实证）+ conftest 会话复用（api_client session 级 + ui_auth_state cookie 注入，收编 M4 P3-1）+ pages/pim_page.py + tests/e2e/ 两条混合闭环用例。**过程中两次真实排障**：①Save 后竞态（前端先发 unique 校验再 POST，~2s 延迟）→ toast 语义等待修复；②全量暴露 expect 断言 5s 盲区（不受 set_default_timeout 影响）→ 断言超时校准。终态 **e2e 2 passed；全量 12 passed**（Builder 111.68s / Reviewer 104.26s 双绿）。**Review APPROVED_WITH_FIXES → P2-1（E2E-02 失败安全清理）修复后复跑 2 passed 31.83s + 残留核验 0 → APPROVED 终态，M5 关闭** |
 
 ## 验证记录
 
@@ -50,6 +51,18 @@
 | 2026-09-15 | M4 | **API 层实测运行** | `pytest -m api`：**5 passed in 14.34s，退出码 0**（登录成功/错误凭证失败/未登录 401+实测文案/列表结构+关键字段/limit 分页+total 一致性）。对照 UI 层同规模 43.24s——**3 倍速差，测试金字塔的实测证据** |
 | 2026-09-15 | M4 | 全量运行（暴露 M1 遗留问题） | `pytest` 不带环境变量：**5 passed（API）+ 5 errors（UI）**——shell 忘设 PLAYWRIGHT_BROWSERS_PATH 则 UI 全挂，M1 Review P2-1 只修了文档没除根。修复：conftest.py 顶部 `os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", 项目内路径)`。**修复后全量 10 passed in 65.40s，零环境变量直接可跑** |
 | 2026-09-15 | M4 | Review P2-1 修复（Builder 执行）+ 复跑 | api/pim.py `list_employees` URL 由 `settings.BASE_URL` 改为 `self.client.base_url`（PIMApi 接受 client 参数但 URL 直取全局配置，传自定义 base_url 的 client 时仍打公网——M6 本地 Docker 依赖此设计）。修复后复跑 `pytest -m api`：**5 passed in 16.57s，退出码 0**，用例零变化。M4 → APPROVED 终态 |
+| 2026-09-15 | M5 | 探测：员工创建 API | POST /web/index.php/api/v2/pim/employees + JSON body {"firstName","middleName","lastName"} → **200**，data.empNumber 返回主键。M4 建立的 API 风格认知下一次命中（对比 M4 登录探测的六轮证伪） |
+| 2026-09-15 | M5 | 探测：员工删除 API 证伪链 | 变体① `?ids[0]=n` → 404 Records Not Found；变体② 路径参数 `/employees/{n}` → 405。**定音：DELETE + JSON body `{"ids":[n]}` → 200 {"data":["544"]}**。附带教训：删除验证时按 employeeId 补零搜索误报"未删"——empNumber（主键 int）与 employeeId（显示编号 str）是两套编号体系，按 lastName 唯一名搜索才确认真删成功 |
+| 2026-09-15 | M5 | 探测：搜索参数有效性 | `?name=`（模糊匹配 first/last）**200 有效**；`lastName` 参数 **422 Invalid Parameter**。共享环境再实证：列表 total 331→363（探测时段内他人持续造数），C2 唯一命名必要性 |
+| 2026-09-15 | M5 | 探测：cookie 注入会话复用 | API 登录的 `orangehrm` HttpOnly cookie 转换为 Playwright storage_state 格式注入 new_context → 直达 /pim/viewEmployeeList **不跳登录页，h6 显示 "PIM"**。方案可行性确认：e2e 免 UI 登录（快 + 不依赖 SPA 渲染） |
+| 2026-09-15 | M5 | 探测：PIM 页 DOM 摸底 | 列表 51 行渲染；搜索框是自动补全 placeholder "Type for hints..."（页面两个，first 为 Employee Name）；空结果显示 "No Records Found"；Add 表单 First/Middle/Last Name placeholder + Cancel/Save 按钮 |
+| 2026-09-15 | M5 | e2e 首跑 | **1 error + 1 failed**：①fixture 解包 bug（造数 payload 驼峰字段 vs create_employee 蛇形签名）；②E2E-02 UI 提交后 API 搜不到员工 |
+| 2026-09-15 | M5 | **排障：Save 后竞态（Playwright 网络监听诊断）** | Save 点击后监听请求流：前端**先发 employeeId 唯一性校验**（GET core/validation/unique）**再 POST 创建**（点击后 ~2s 才落库，t+3s 出 toast）。立即查 API 必扑空。修复：add_employee 内 `expect("Successfully Saved") toast` 业务语义等待（非 sleep）。诊断过程顺带验证：toast 出现后 API matched 确认 + cleanup 200 |
+| 2026-09-15 | M5 | e2e 复跑（修复后） | `pytest -m e2e`：**2 passed in 22.74s，退出码 0**。E2E-01（API 造数→UI 搜索验证）+ E2E-02（UI 添加→API 落库断言→清理）全绿 |
+| 2026-09-15 | M5 | **全量首跑（暴露 M3 修复盲区）** | `pytest`：**11 passed + 1 failed in 118.18s**。失败=登录正向用例：expect(to_have_url) 轮询期间 URL=None（dashboard 导航进行中）5s 超时。**根因：expect 断言默认 5s 不受 set_default_timeout(20s) 影响**——M3 超时校准只覆盖操作层，断言层是盲区；本时段公网过载（全量 118s vs M4 65s 佐证）撞上。M5 变更未触碰登录路径，属环境暴露的潜伏问题 |
+| 2026-09-15 | M5 | **修复：断言超时校准 + 全量复跑** | expect_logged_in 显式 `timeout=DEFAULT_TIMEOUT*1000`（20s，等待预算校准非放宽断言标准）。全量：**12 passed in 111.68s，退出码 0**（UI 5 + API 5 + e2e 2，公网过载时段全绿） |
+| 2026-09-15 | M5 | **Reviewer 独立复跑（M5 Review）** | 全量 `pytest`：**12 passed in 104.26s，退出码 0**（Builder 111.68s，均全绿，~7% 波动属公网正常区间）。判定 APPROVED_WITH_FIXES：P2-1 E2E-02 清理不在失败安全路径（assert 失败时 delete 不执行 → 共享环境残留） |
+| 2026-09-15 | M5 | Review P2-1 修复（Builder 执行）+ 复跑 + 清理核验 | E2E-02 清理移入 finally（失败时重新搜索唯一名再删，不依赖 try 内的 matched）。复跑 `pytest -m e2e`：**2 passed in 31.83s，退出码 0**。**清理真实性核验：API 搜索今日 M5 命名（"M5091" 前缀）残留员工数 = 0**——自造自清闭环实证。M5 → APPROVED 终态 |
 
 ## M1 自评总结（Builder）
 

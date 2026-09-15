@@ -370,3 +370,57 @@ Reviewer 首跑（wait_until 修复后、超时仍 10s 时）：**3 passed + 2 e
 - 会话维持（Cookie）怎么讲：✅ 有完整探测实证
 - 抓包定位：✅ Playwright 网络监听是超出常规预期的亮点
 - 金字塔为什么 API 做主力：✅ 有本项目实测数字（3 倍速差）
+
+---
+---
+
+# M5 审查：UI+API 混合造数（2026-09-15）
+
+## 审查信息
+
+- 模块：M5 UI+API 混合造数（数据工厂 / 会话复用 / e2e 闭环）
+- 审查范围：utils/factory.py、api/pim.py（create/delete/search 扩展）、conftest.py（api_client/ui_auth_state/ui_auth_page）、pages/pim_page.py、tests/e2e/test_pim_hybrid.py、pytest.ini（e2e marker）、MODULE_FEEDBACK M5 记录（探测→排障→实测全链路）、独立复跑
+
+## 独立复跑
+
+全量 `pytest`（零环境变量，与 Builder 同日不同时段）：**12 passed in 104.26s**（Builder 111.68s，均全绿，~7% 波动属公网 Demo 站正常区间）。M5 修复的断言超时校准（expect_logged_in 20s）在 Reviewer 侧同样生效。
+
+## 正确项
+
+1. **混合闭环分层教科书级**：造数/清理/存在性断言全走 API，UI 只承担关键用户路径（搜索验证 / 表单提交）。e2e 仅 2 条，量级符合金字塔顶层"少而精"——没有为了"混合"而混合
+2. **唯一命名有双重实证支撑**：M0（3 分钟 315→316）+ M5 探测时段（331→363），factory 设计（时间戳+随机，肉眼可读）直接对应 C2 约束，不是教条式 best practice
+3. **会话复用方案有工程深度**：API 登录 cookie → storage_state 注入，规避 UI 登录的 SPA 渲染波动（M3 flaky 教训的体系化应用）；conftest 注释明确 page（匿名，登录测试专用）与 ui_auth_page（带登录态）的边界——防止"用已登录状态测登录"的经典错误
+4. **Save 后竞态的排障是 M5 最大亮点**：网络监听定位根因（前端先发 employeeId 唯一性校验再 POST，点击后 ~2s 落库）→ toast 业务语义等待修复，注释留痕。这是"正确等待条件 > 加大超时"原则的第二次应用（第一次 M3 domcontentloaded）
+5. **expect 5s 盲区的发现**：M3 超时校准只覆盖操作层，断言层盲区由 M5 全量暴露并修复——修复跨层系统性问题的意识
+6. **探测方法论进化可量化**：M4 登录探测六轮证伪 → M5 创建 API 一次命中（风格认知积累：`/api/v2/*` 是 JSON API），但删除 API 仍走了变体证伪——不因上轮成功就跳过实证
+7. **empNumber/employeeId 两套编号的教训**（探测中 exists 误报）写进 api/pim.py 文档字符串——错误转化为文档
+
+## 问题
+
+### P2 - 一般问题
+
+- **P2-1：E2E-02 清理不在失败安全路径上**
+  - 证据：`test_ui_created_employee_exists_via_api` 中 `assert matched` 失败时，其后的 `pim_api.delete_employee(...)` 不执行
+  - 影响：用例失败 = UI 已创建的员工残留共享环境。AGENTS §6（测试结束清理）只在用例**通过**时成立
+  - 修复：清理移入 finally（或 fixture teardown）：失败时重新搜索唯一名 → 删除
+
+### P3 - 优化建议（不阻塞）
+
+1. E2E-01 fixture teardown 的 delete 无结果校验（静默失败）——当前单员工场景幂等性够用，M6 本地环境后可加孤儿数据清理策略
+2. ui_auth_state 硬编码 `httpOnly: True`——当前系统仅一个 orangehrm cookie（M0 实测），多 cookie 场景需从 Set-Cookie 响应头解析属性
+3. 其余 expect 断言（error_message/required_hints/to_be_visible 等）仍是 5s 默认超时，仅 expect_logged_in 校准了 20s——统一断言预算策略建议 M7 失败定位体系时一并处理
+4. unique_tag 同秒并发碰撞概率 = 千分之一 × 同时段同进程，实际可忽略，不阻塞
+
+## 审查结论
+
+### 当前状态
+
+**APPROVED_WITH_FIXES → APPROVED**（后记：Builder 已完成 P2-1 修复——E2E-02 清理移入 finally，失败路径重新搜索唯一名再删。复跑 `pytest -m e2e` 2 passed in 31.83s 退出码 0；**清理真实性核验：API 搜索今日 "M5091" 前缀残留 = 0**。验证记录见 MODULE_FEEDBACK 2026-09-15 P2-1 修复行。M5 关闭）
+
+### 面试能力评估
+
+- 测试数据管理怎么讲：✅ 唯一命名 + 自造自清 + 双重实证，完整
+- 测试独立性怎么讲：✅ 能区分"用例间依赖"与"用例与环境依赖"，fixture scope 取舍有明确理由（function 隔离 vs session 速度）
+- flaky test 主要来源怎么讲：✅ 本模块新增两个实证——竞态类（Save 后立即断言）与环境类（expect 5s 盲区 × 公网过载）
+- UI 断言 vs API 断言的差异：✅ E2E-01/02 双向设计正是这个问题的活答案
+- 会话复用/storage_state：✅ API cookie 注入方案 + 使用边界注释，超出"会用"层面的理解

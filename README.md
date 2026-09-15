@@ -12,7 +12,8 @@ UI 自动化（Playwright）+ API 自动化（Requests）+ 分层测试设计 + 
 - [x] M2：Fixture 三层架构（playwright→browser→page）+ 参数化，5 用例实测 **5 passed 36.32s**（较 M1 裸版每例均耗时 -38%）
 - [x] M3：POM 重构，定位器集中到 LoginPage，实测 **5 passed 43.24s**（含 Demo 站时段性过载的 flaky 治理：domcontentloaded 等待策略 + 超时 20s 校准，过程留痕）
 - [x] M4：API 层（requests 会话客户端 + PIM 接口封装），**5 passed 14.34s**（P2-1 修复后复跑 16.57s）；全量 UI+API **10 passed 65.40s**
-- [ ] M5–M11：混合造数 → DB 校验 → 失败定位 → Allure → CI → Docker
+- [x] M5：混合造数（数据工厂唯一命名 + API cookie 注入 storage_state 会话复用 + e2e 双向闭环），**全量 12 passed**（Builder 111.68s / Reviewer 104.26s 双绿）；两次真实排障（Save 后竞态 → toast 语义等待；expect 断言 5s 盲区 → 超时校准）
+- [ ] M6–M11：DB 校验 → 失败定位 → Allure → CI → Docker
 
 ## 目录结构与设计理由
 
