@@ -1,0 +1,34 @@
+# M6：OrangeHRM 5.9 无人值守安装配置（本地 Docker 副本专用）
+# 原始模板位置：容器内 /var/www/html/installer/cli_install_config.yaml
+# 用法：
+#   docker cp docker/cli_install_config.yaml ohrm-app:/var/www/html/installer/cli_install_config.yaml
+#   docker exec -w /var/www/html ohrm-app php installer/console install:on-new-database -n
+# 注意：旧入口 cli_install.php 已废弃（运行时会打印弃用告警并指向上面的 console 命令）
+
+database:
+  hostName: db                # compose 服务名，同网络内 DNS 解析（不能用 127.0.0.1——容器内无 MySQL）
+  hostPort: 3306
+  databaseName: orangehrm
+  privilegedDatabaseUser: root
+  privilegedDatabasePassword: root_password_local
+  useSameDbUserForOrangeHRM: n   # 应用账号与特权账号分离：安装用 root，运行用最小权限 ohrm
+  orangehrmDatabaseUser: ohrm
+  orangehrmDatabasePassword: ohrm_password_local
+  isExistingDatabase: n         # 安装器自建库（先 DROP 预置空库再装，保证语义一致）
+  enableDataEncryption: n
+
+organization:
+  name: Demo Org
+  country: US                   # 安装器国家代码表默认值，避免非法代码中断安装
+
+admin:
+  adminUserName: Admin
+  adminPassword: Admin@Local1   # 本地专用密码，与公网 Demo 的 admin/admin123 区分
+  adminEmployeeFirstName: Local
+  adminEmployeeLastName: Admin
+  workEmail: admin@local.test
+  contactNumber: ~
+  registrationConsent: true
+
+license:
+  agree: y

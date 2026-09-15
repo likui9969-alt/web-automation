@@ -7,13 +7,14 @@ UI 自动化（Playwright）+ API 自动化（Requests）+ 分层测试设计 + 
 
 > 本节只记录**实际验证过**的事实，禁止虚构测试数量/通过率。进度详见 [MODULE_FEEDBACK.md](MODULE_FEEDBACK.md)。
 
-- [x] M0（进行中）：被测系统摸底、登录模块 15 项测试点实测、PIM 接口抓包
+- [x] M0（已按 M0-lite 收口）：被测系统摸底、C1–C4 硬约束、登录模块 15 项测试点实测、PIM 接口抓包；PIM 测试点由 M4–M6 实践覆盖，Leave/Recruitment 为对应模块开工前置（见 PLAN.md §3 决策记录）
 - [x] M1：项目骨架 + 专属 venv + Chromium（镜像下载）+ 裸登录脚本 3 用例，实测 **3 passed**（Builder 35.29s / Reviewer 复跑 29.78s，两次均通过）；git 仓库已初始化（Review P1 已解决）
 - [x] M2：Fixture 三层架构（playwright→browser→page）+ 参数化，5 用例实测 **5 passed 36.32s**（较 M1 裸版每例均耗时 -38%）
 - [x] M3：POM 重构，定位器集中到 LoginPage，实测 **5 passed 43.24s**（含 Demo 站时段性过载的 flaky 治理：domcontentloaded 等待策略 + 超时 20s 校准，过程留痕）
 - [x] M4：API 层（requests 会话客户端 + PIM 接口封装），**5 passed 14.34s**（P2-1 修复后复跑 16.57s）；全量 UI+API **10 passed 65.40s**
 - [x] M5：混合造数（数据工厂唯一命名 + API cookie 注入 storage_state 会话复用 + e2e 双向闭环），**全量 12 passed**（Builder 111.68s / Reviewer 104.26s 双绿）；两次真实排障（Save 后竞态 → toast 语义等待；expect 断言 5s 盲区 → 超时校准）
-- [ ] M6–M11：DB 校验 → 失败定位 → Allure → CI → Docker
+- [x] M6：本地 Docker 部署（OrangeHRM 5.9 + MySQL 8.0，无人值守安装器）+ DB 持久化校验层（pymysql 只读、ohrm_ro 最小权限账号、环境门控 skip），**本地全量 14 passed in 9.49s**（公网同套 12 条 104~111s，~11 倍速差；Reviewer 复跑 9.65s）；两次真实排障（解释器错位 → 项目 venv；localhost cookie domain 陷阱 → domain 取 BASE_URL host）；DB 层发现：API 创建员工的 employee_id 为 NULL（显示编号不在 API 路径生成）。Review APPROVED（断言预算收敛 ASSERT_TIMEOUT_MS ×5 处 + 稳定性 5/5）
+- [ ] M7–M11：失败定位 → Allure → CI → 模拟环境
 
 ## 目录结构与设计理由
 
@@ -57,8 +58,37 @@ playwright install chromium
 # 3. 运行
 python -m pytest -m ui        # 只跑 UI 层
 python -m pytest -m api       # 只跑 API 层（M4 起）
+python -m pytest -m e2e       # UI+API 混合闭环（M5 起）
 python -m pytest              # 全量
 ```
+
+### 本地 Docker 环境（M6 起，含 DB 校验）
+
+公网 Demo 是共享环境（数据污染、无 DB 权限、公网波动），本地 Docker 副本是确定性的被测系统。
+同一套测试代码，**切换只靠环境变量，不改一行代码**：
+
+```powershell
+# 1. 拉起本地被测系统（首次含镜像拉取）
+docker compose -f docker/docker-compose.yml up -d
+
+# 2. 首次：无人值守安装（配置文件在 docker/cli_install_config.yaml，
+#    安装器会自动删除容器内含明文密码的 yaml）
+docker cp docker/cli_install_config.yaml ohrm-app:/var/www/html/installer/
+docker exec -w /var/www/html ohrm-app php installer/cli_install.php
+
+# 3. 首次：创建 DB 校验专用只读账号（最小权限在 DB 侧强制，非客户端自律）
+docker exec ohrm-db mysql -uroot -proot_password_local -e "CREATE USER 'ohrm_ro'@'%' IDENTIFIED WITH mysql_native_password BY 'ohrm_ro_password_local'; GRANT SELECT ON orangehrm.* TO 'ohrm_ro'@'%'; FLUSH PRIVILEGES;"
+
+# 4. 切换到本地环境跑（凭证为安装配置中的本地专用账号，非公网 Demo）
+$env:ORANGEHRM_BASE_URL = "http://localhost:8080"
+$env:ORANGEHRM_USERNAME = "Admin"
+$env:ORANGEHRM_PASSWORD = "Admin@Local1"
+python -m pytest -m db         # DB 持久化校验（仅本地环境，其他环境自动 skip）
+python -m pytest              # 全量 14 条
+```
+
+不设上述环境变量时默认跑公网 Demo（DB 用例自动 skip）。
+MySQL 经宿主机 13306 端口暴露，测试用只读账号 `ohrm_ro` 校验（仅 SELECT，实测 INSERT 被拒）。
 
 ## 被测系统硬约束（项目设计依据）
 

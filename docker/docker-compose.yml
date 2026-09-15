@@ -1,0 +1,47 @@
+# M6：本地部署 OrangeHRM 5.9（被测系统的 Docker 化副本）
+#
+# 为什么需要本地：C1 约束——Demo 数据库不可直连（托管服务无 MySQL 端口暴露），
+# DB 校验只能对自部署环境做。
+# 明确标注：本地学习环境 ≠ Demo 线上环境，两环境结论不可互相套用（PLAN 风险登记册）。
+#
+# 端口：
+#   8080  -> app（HTTP，BASE_URL 切 http://localhost:8080 即本地测试）
+#   13306 -> MySQL（宿主机非默认端口，避免与本机既有 MySQL 冲突；pymysql 直连用）
+#
+# 首次启动需走 web installer（或容器内 CLI）：见 MODULE_FEEDBACK M6 验证记录。
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: ohrm-db
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password_local
+      MYSQL_DATABASE: orangehrm
+      MYSQL_USER: ohrm
+      MYSQL_PASSWORD: ohrm_password_local
+    # pymysql 免 caching_sha2 依赖坑：本地学习环境用 native password 足够
+    command: --default-authentication-plugin=mysql_native_password
+    ports:
+      - "13306:3306"
+    volumes:
+      - ohrm_dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot_password_local"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  app:
+    image: orangehrm/orangehrm:5.9
+    container_name: ohrm-app
+    ports:
+      - "8080:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ohrm_appdata:/var/www/html
+
+volumes:
+  ohrm_dbdata:
+  ohrm_appdata:

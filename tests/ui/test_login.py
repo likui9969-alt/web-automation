@@ -28,12 +28,14 @@ def test_login_valid_credentials(login_page):
 def test_login_invalid_credentials(login_page, username, password):
     # LOGIN-02：任何错误组合 → 统一报错且不跳转（M0 实测：防用户枚举）
     login_page.login(username, password)
-    expect(login_page.error_message).to_be_visible()
+    # 断言预算统一取 settings.ASSERT_TIMEOUT_MS（全面复审 P1-2 修复：
+    # expect 默认 5s 不受 set_default_timeout 影响，Demo 过载时 toast >5s）
+    expect(login_page.error_message).to_be_visible(timeout=settings.ASSERT_TIMEOUT_MS)
     assert "/auth/login" in login_page.url
 
 
 def test_login_empty_fields(login_page):
     # LOGIN-03：空表单提交 → 前端校验拦截，两个字段各自 Required
     login_page.submit_empty()
-    expect(login_page.required_hints).to_have_count(2)
+    expect(login_page.required_hints).to_have_count(2, timeout=settings.ASSERT_TIMEOUT_MS)
     assert "/auth/login" in login_page.url

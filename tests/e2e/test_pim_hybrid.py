@@ -9,6 +9,7 @@ import pytest
 from playwright.sync_api import expect
 
 from api.pim import PIMApi
+from config import settings
 from pages.pim_page import PimPage
 from utils.factory import make_employee
 
@@ -43,7 +44,9 @@ def test_api_created_employee_visible_in_ui(api_created_employee, ui_auth_page):
     pim = PimPage(ui_auth_page).open()
     pim.search(name)
     # expect 自动轮询：搜索请求返回 + 行渲染完成即通过，无需手动等待
-    expect(pim.result_rows.filter(has_text=name).first).to_be_visible()
+    # 断言预算统一取 settings.ASSERT_TIMEOUT_MS（全面复审 P1-2 收敛）
+    expect(pim.result_rows.filter(has_text=name).first).to_be_visible(
+        timeout=settings.ASSERT_TIMEOUT_MS)
 
 
 def test_ui_created_employee_exists_via_api(ui_auth_page, pim_api):

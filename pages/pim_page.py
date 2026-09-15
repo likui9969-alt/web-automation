@@ -52,7 +52,10 @@ class PimPage:
         self.middle_name_input.fill(middle_name)
         self.last_name_input.fill(last_name)
         self.save_button.click()
-        expect(self.page.get_by_text("Successfully Saved")).to_be_visible()
+        # 断言预算统一取 settings.ASSERT_TIMEOUT_MS（全面复审 P1-2 修复）
+        expect(self.page.get_by_text("Successfully Saved")).to_be_visible(
+            timeout=settings.ASSERT_TIMEOUT_MS
+        )
 
     # ---- 供测试断言用的页面状态 ----
 

@@ -27,3 +27,7 @@ chromedriver.exe
 
 # IDE
 .idea/
+.vscode/
+
+# AI 工具会话记忆（内部工作数据，与项目交付无关）
+.workbuddy/

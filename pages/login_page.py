@@ -63,11 +63,11 @@ class LoginPage:
     def expect_logged_in(self) -> None:
         """登录成功的页面状态（URL 细节属于页面知识，测试不必关心）。
 
-        timeout 显式对齐 DEFAULT_TIMEOUT（20s）：M5 全量实测发现 expect
-        断言默认 5s **不受** set_default_timeout 影响，公网过载时 dashboard
-        导航进行中 URL 轮询读到 None 直至超时——M3 超时校准同一逻辑的
-        断言层延伸（等待预算校准，非放宽断言标准）。
+        断言预算统一取 settings.ASSERT_TIMEOUT_MS（20s，全面复审 P1-2 收敛）：
+        M5 全量实测发现 expect 断言默认 5s **不受** set_default_timeout 影响，
+        公网过载时 dashboard 导航进行中 URL 轮询读到 None 直至超时——
+        等待预算校准，非放宽断言标准。
         """
         expect(self.page).to_have_url(
             re.compile(r"/dashboard/index"),
-            timeout=settings.DEFAULT_TIMEOUT * 1000)
+            timeout=settings.ASSERT_TIMEOUT_MS)

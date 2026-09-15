@@ -82,13 +82,24 @@ def ui_auth_state(api_client):
     快（秒级）且不依赖 SPA 渲染——M3 教训：公网过载时 UI 登录的
     goto 可能随机超时，登录态构造不该被页面渲染波动劫持。
     M5 探测实测：注入 orangehrm HttpOnly cookie 后直达 PIM 列表，不跳登录页。
+
+    domain 为什么取 BASE_URL 的 host 而不是 cookie 自带属性（M6 实测教训）：
+    requests/http.cookiejar 对 localhost 会话 cookie 存成 "localhost.local"
+    （cookielib 的历史怪癖），API 客户端自身不受影响（cookiejar 发送时
+    特判 localhost），但 Playwright/Chromium 严格按 domain 匹配 →
+    注入的 cookie 送不出去 → 被 302 回登录页。cookie 能否送达只取决于
+    domain 与访问主机是否匹配，会话凭证是 value——所以 domain 直接用
+    实际访问的主机，跨环境（demo 域名 / localhost）都成立。
     """
+    from urllib.parse import urlparse
+
+    host = urlparse(settings.BASE_URL).hostname
     return {
         "cookies": [
             {
                 "name": ck.name,
                 "value": ck.value,
-                "domain": ck.domain.lstrip("."),
+                "domain": host,
                 "path": ck.path or "/",
                 "expires": ck.expires if ck.expires else -1,  # -1 = 会话 cookie
                 "httpOnly": True,  # M0 实测：orangehrm cookie 为 HttpOnly
@@ -113,3 +124,30 @@ def ui_auth_page(browser, ui_auth_state):
     page.set_default_timeout(settings.DEFAULT_TIMEOUT * 1000)
     yield page
     context.close()
+
+
+# ---- M6：DB 校验层（仅本地 Docker 环境）----
+
+@pytest.fixture(scope="session")
+def db_client():
+    """DB 校验会话：直查本地 MySQL 验证「数据真的落库了」。
+
+    环境能力门控（不是隐藏失败）：DB 用例在公网 Demo 环境 skip，
+    报告里显式可见；本地环境全量执行。
+    双重门控的理由：
+    1. BASE_URL 必须是本地——防止「对 Demo 实例做 API 操作、却查本地库」
+       的错配：行当然查不到，那不是 bug 是环境错乱
+    2. DB 必须可达——compose 没拉起时 skip 而非 error
+    """
+    if not any(h in settings.BASE_URL for h in ("localhost", "127.0.0.1")):
+        pytest.skip("DB 校验仅支持本地 Docker 环境（当前 BASE_URL 非本地）")
+    import pymysql
+
+    from utils.db_client import DBClient
+
+    try:
+        client = DBClient()
+        client.query("SELECT 1")
+    except pymysql.err.OperationalError as e:
+        pytest.skip(f"本地 MySQL 不可达，DB 校验 skip：{e}")
+    return client
