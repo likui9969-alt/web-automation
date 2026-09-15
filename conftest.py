@@ -14,6 +14,14 @@ M1 裸版（git 历史 c93f61e 可对照）每用例自建浏览器的代价：
 yield 语义：之前的代码 = setup，之后的 = teardown。
 断言失败也会执行 teardown（对比 M1：断言挂了 browser.close() 永远走不到）。
 """
+import os
+from pathlib import Path
+
+# 必须在任何 Playwright 浏览器启动前执行（M4 全量运行实测咬人：
+# 新开终端忘设 PLAYWRIGHT_BROWSERS_PATH → UI 全部 error）。
+# setdefault：外部已显式设置（CI 自定义路径）时不覆盖。
+os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(Path(__file__).parent / ".playwright-browsers"))
+
 import pytest
 from playwright.sync_api import sync_playwright
 

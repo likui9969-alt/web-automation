@@ -5,3 +5,4 @@
 
 pytest>=8.0
 playwright>=1.40
+requests>=2.31  # M4：API 层会话客户端（2.34.2 实测通过）

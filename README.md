@@ -8,9 +8,11 @@ UI 自动化（Playwright）+ API 自动化（Requests）+ 分层测试设计 + 
 > 本节只记录**实际验证过**的事实，禁止虚构测试数量/通过率。进度详见 [MODULE_FEEDBACK.md](MODULE_FEEDBACK.md)。
 
 - [x] M0（进行中）：被测系统摸底、登录模块 15 项测试点实测、PIM 接口抓包
-- [x] M1：项目骨架 + 专属 venv + Chromium（镜像下载）+ 裸登录脚本 3 用例，实测 **3 passed**（Builder 35.29s / Reviewer 复跑 29.78s，两次均通过）
-- [ ] M1 遗留：git 安装 + 仓库初始化（Review P1，待项目所有者配合）
-- [ ] M2–M11：Fixture/参数化 → POM → API 层 → 混合造数 → DB 校验 → 失败定位 → Allure → CI → Docker
+- [x] M1：项目骨架 + 专属 venv + Chromium（镜像下载）+ 裸登录脚本 3 用例，实测 **3 passed**（Builder 35.29s / Reviewer 复跑 29.78s，两次均通过）；git 仓库已初始化（Review P1 已解决）
+- [x] M2：Fixture 三层架构（playwright→browser→page）+ 参数化，5 用例实测 **5 passed 36.32s**（较 M1 裸版每例均耗时 -38%）
+- [x] M3：POM 重构，定位器集中到 LoginPage，实测 **5 passed 43.24s**（含 Demo 站时段性过载的 flaky 治理：domcontentloaded 等待策略 + 超时 20s 校准，过程留痕）
+- [x] M4：API 层（requests 会话客户端 + PIM 接口封装），**5 passed 14.34s**（P2-1 修复后复跑 16.57s）；全量 UI+API **10 passed 65.40s**
+- [ ] M5–M11：混合造数 → DB 校验 → 失败定位 → Allure → CI → Docker
 
 ## 目录结构与设计理由
 
@@ -35,8 +37,9 @@ UI 自动化（Playwright）+ API 自动化（Requests）+ 分层测试设计 + 
 ## 快速开始
 
 > 实测约束：国内网络下 Playwright 官方 CDN（cdn.playwright.dev）不可达（5 分钟 0% 实测），
-> 必须走 npmmirror 镜像；浏览器二进制装在项目内 `.playwright-browsers/`（已 gitignore），
-> **运行** UI 测试时同样需要 `PLAYWRIGHT_BROWSERS_PATH` 指向该目录。
+> 必须走 npmmirror 镜像；浏览器二进制装在项目内 `.playwright-browsers/`（已 gitignore）。
+> 运行时无需手动设置浏览器路径——conftest.py 顶部已 `setdefault` 指向该目录
+> （M4 全量运行实测踩坑后的代码级修复，外部显式设置优先）。
 
 ```powershell
 # 0. 激活项目专属虚拟环境（Python 3.11.9）
@@ -50,8 +53,7 @@ $env:PLAYWRIGHT_DOWNLOAD_HOST = "https://cdn.npmmirror.com/binaries/playwright"
 $env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\.playwright-browsers"
 playwright install chromium
 
-# 3. 运行（每次新开终端执行 UI 测试前，设置浏览器路径）
-$env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\.playwright-browsers"
+# 3. 运行
 python -m pytest -m ui        # 只跑 UI 层
 python -m pytest -m api       # 只跑 API 层（M4 起）
 python -m pytest              # 全量

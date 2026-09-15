@@ -11,6 +11,7 @@
 | M1 环境搭建 + 裸登录脚本 | APPROVED | 2026-09-15 | Review 85/100 后 P1/P2 全部闭环：P2×2 已修复（README）；P1 git 已解决（见验证记录 2026-09-15 P1 修复行）。**M1 正式关闭，进入 M2** |
 | M2 Fixture + 参数化 | APPROVED | 2026-09-15 | Review：**APPROVED_WITH_FIXES → 修复后 APPROVED**。正确项：三层 fixture scope 决策、yield teardown、参数化有 M0 依据、性能归因诚实。P2-1（data/ 承诺未兑现）已修复：参数组外置 `data/credentials.py`，修复后复跑 5 passed in 47.18s。P3×3 记录在 [REVIEW_FEEDBACK.md](REVIEW_FEEDBACK.md) 不阻塞 |
 | M3 POM | APPROVED | 2026-09-15 | pages/login_page.py 激活 POM：定位器 7→0 处散落、URL/操作语义收编、断言分层取舍有注释。**过程中遭遇真实 flaky**：公网过载致 goto 随机超时（同代码 5P 与 3P+2E 并存），经 wait_until=domcontentloaded + 超时 20s 校准双修复后稳定 5 passed。全程排障记录见验证记录（面试黄金素材） |
+| M4 API 层 | APPROVED | 2026-09-15 | **六轮探测证伪链**（表单无 token→JSON 405→UA 无效→Playwright 网络监听抓真相）：登录=Vue 壳 `<auth-login :token>` 提取 + POST /auth/validate；API 真实路径含 /web/index.php 前缀（M0 抓包漏记）。api/client.py + api/pim.py 语义封装，**API 层 5 passed in 14.34s（vs UI 同规模 43.24s，3 倍速差=金字塔实测证据）**。全量 10 passed in 65.40s；conftest setdefault 彻底修复浏览器路径依赖（M1 P2-1 终闭环）。**Review APPROVED_WITH_FIXES → P2-1（PIMApi base_url 一致性）修复后复跑 5 passed 16.57s → APPROVED 终态，M4 关闭** |
 
 ## 验证记录
 
@@ -40,6 +41,15 @@
 | 2026-09-15 | M3 | **修复 1：wait_until 策略** | `goto` 默认等 load（全部资源），SPA 只需 DOM ready。改 `wait_until="domcontentloaded"` 后 **5 passed in 35.43s**（正确等待条件优于无脑加大超时，且更快） |
 | 2026-09-15 | M3 | **Reviewer 独立复跑（M3 Review）** | 同一代码 Reviewer 跑出 **3 passed + 2 errors**（goto 仍超时）——Builder 5P / Reviewer 3P+2E 并存，坐实时段性过载。Review 价值实证：环境波动只有独立复跑才能暴露 |
 | 2026-09-15 | M3 | **修复 2：超时预算校准** | DEFAULT_TIMEOUT 10→20s（注释留痕实测依据：过载时 DOM ready >10s）。环境参数按实测校准，非放宽断言标准（AGENTS §14 合规）。**最终 5 passed in 43.24s，退出码 0** |
+| 2026-09-15 | M4 | 探测 v1：表单 POST /auth/validate | 302 回登录页（登录失败）。GET /api/v2/... 返回 404。假设"简单表单提交"被证伪 |
+| 2026-09-15 | M4 | 探测 v2：CSRF + XHR header | 登录页 HTML 无 `_csrf_token` 字段；`X-Requested-With` header 未解锁 API（仍 404）。两个假设再证伪 |
+| 2026-09-15 | M4 | 探测 v3：JSON POST /auth/login | **405 Method Not Allowed**——SPA JSON 登录假设证伪 |
+| 2026-09-15 | M4 | 探测 v4：浏览器 UA | UA 更换无效，404 依旧——WAF 软拦截假设证伪 |
+| 2026-09-15 | M4 | 探测 v5：**Playwright 网络监听（决定性）** | 真实登录 POST 抓到：字段为 **`_token`**（Symfony，非 _csrf_token）；API 真实路径为 **`/web/index.php/api/v2/...`**（M0 抓包记录漏 /web/index.php 前缀——404 之谜解开）。教训：四次"合理推测"全错，浏览器网络监听一次定音 |
+| 2026-09-15 | M4 | 探测 v6：token 藏匿位置 | 登录页 HTML 壳仅 3467 字节（React SPA 壳），token 在 `<auth-login :token="...">` Vue 组件属性里（HTML 实体编码需 unescape）。全链路实测：提取 token（109 字符）→ POST 302→dashboard → GET employees **200**（meta.total=331）→ 未登录 **401 "Session expired"** → limit=1 返回 1 条 |
+| 2026-09-15 | M4 | **API 层实测运行** | `pytest -m api`：**5 passed in 14.34s，退出码 0**（登录成功/错误凭证失败/未登录 401+实测文案/列表结构+关键字段/limit 分页+total 一致性）。对照 UI 层同规模 43.24s——**3 倍速差，测试金字塔的实测证据** |
+| 2026-09-15 | M4 | 全量运行（暴露 M1 遗留问题） | `pytest` 不带环境变量：**5 passed（API）+ 5 errors（UI）**——shell 忘设 PLAYWRIGHT_BROWSERS_PATH 则 UI 全挂，M1 Review P2-1 只修了文档没除根。修复：conftest.py 顶部 `os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", 项目内路径)`。**修复后全量 10 passed in 65.40s，零环境变量直接可跑** |
+| 2026-09-15 | M4 | Review P2-1 修复（Builder 执行）+ 复跑 | api/pim.py `list_employees` URL 由 `settings.BASE_URL` 改为 `self.client.base_url`（PIMApi 接受 client 参数但 URL 直取全局配置，传自定义 base_url 的 client 时仍打公网——M6 本地 Docker 依赖此设计）。修复后复跑 `pytest -m api`：**5 passed in 16.57s，退出码 0**，用例零变化。M4 → APPROVED 终态 |
 
 ## M1 自评总结（Builder）
 

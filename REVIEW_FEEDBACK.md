@@ -318,3 +318,55 @@ Reviewer 首跑（wait_until 修复后、超时仍 10s 时）：**3 passed + 2 e
 - 断言放哪能讲出取舍：✅
 - flaky 排障有完整真实案例：✅（本模块最大收获，可直接用于"讲一次你排查不稳定测试的经历"）
 - 何时不用 POM：⚠️ 建议口头补练"如果只有 1 个用例值不值得建 PO"的判断
+
+---
+---
+
+# M4 审查：API 层（2026-09-15）
+
+## 审查信息
+
+- 模块：M4 API 层（Requests）
+- 审查范围：api/client.py、api/pim.py、tests/api/test_pim_employees.py、conftest.py、requirements.txt、MODULE_FEEDBACK M4 记录（六轮探测）、独立复跑
+
+## 独立复跑
+
+`pytest -m api`：**5 passed in 15.87s**（与 Builder 14.34s 同区间）。全量 `pytest`（零环境变量）：**10 passed**，conftest setdefault 修复在不同终端条件下成立。
+
+## 正确项
+
+1. **六轮探测是"实际系统行为优先"原则的教科书示范**：四次合理推测（表单/CSRF/JSON/UA）全部证伪，最终靠 Playwright 网络监听一锤定音（`_token` 字段名 + `/web/index.php` 路径前缀）。全程证伪链留痕，无一步虚构
+2. **client.login() 返回 bool 而非抛异常**：登录失败是可测场景（API-02 断言 False），异常只留给"页面结构变更"这类环境性故障——错误处理分层正确
+3. **PIMApi 语义封装兑现骨架承诺**（.gitkeep："用例写 pim.list_employees() 而不是裸 requests.post()"）
+4. **API-03 断言用实测文案 "Session expired"**，非想当然的 "unauthorized"
+5. **分页测试的 total 一致性断言**（limit=1 时 total==全量 total）是业务语义级验证，超出简单状态码检查
+6. **金字塔实测证据**：API 5 条 14.34s vs UI 5 条 43.24s（3 倍），README/简历可引用的数字
+7. **conftest setdefault 彻底闭环 M1 P2-1**：全量运行暴露"忘设环境变量 UI 全挂"后，从文档级修复升级为代码级修复，setdefault 保留外部覆盖能力（CI 兼容）
+
+## 问题
+
+### P2 - 一般问题
+
+- **P2-1：PIMApi 忽略 client.base_url（封装一致性漏洞）**
+  - 证据：`PIMApi.__init__` 接受 `client` 参数，但 `list_employees` 的 URL 直取 `settings.BASE_URL`
+  - 影响：传入自定义 base_url 的 client（本地 Docker 环境测试的既定设计，M6 依赖）时，PIMApi 仍打公网地址——潜伏的功能性 bug
+  - 修复：URL 改用 `self.client.base_url`
+
+### P3 - 优化建议
+
+1. `pim` fixture 为 function 级：API-04/05 各自完整登录一次。会话复用是 M5 主题（storage_state），届时统一处理，当前 14s 无优化必要
+2. `_TOKEN_RE` 耦合 HTML 结构——已用 RuntimeError 快速失败兜底（页面改版第一时间暴露），可接受
+3. API-05 调两次 list（limit=1 与全量）断言 total 一致——网络抖动间隙 total 变化（共享环境他人加人）会造成偶发失败；概率极低（毫秒级窗口），M6 本地环境后自然消失，记录在案
+
+## 审查结论
+
+### 当前状态
+
+**APPROVED_WITH_FIXES → APPROVED**（后记：Builder 已完成 P2-1 修复——api/pim.py URL 改用 `self.client.base_url`，复跑 `pytest -m api` 5 passed in 16.57s 退出码 0，验证记录见 MODULE_FEEDBACK 2026-09-15 P2-1 修复行。M4 关闭）
+
+### 面试能力评估
+
+- 接口测试怎么设计：✅ 正向/负向(401)/结构/分页四象限
+- 会话维持（Cookie）怎么讲：✅ 有完整探测实证
+- 抓包定位：✅ Playwright 网络监听是超出常规预期的亮点
+- 金字塔为什么 API 做主力：✅ 有本项目实测数字（3 倍速差）
