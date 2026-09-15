@@ -196,7 +196,7 @@ API：暂无（M4 起，符合计划）
 
 ### 当前状态
 
-NEEDS_FIX
+NEEDS_FIX → **APPROVED**（后记：P1-1/P2-2/P2-1 已于同日全部闭环，git 仓库 c93f61e + 6d00a65，详见 MODULE_FEEDBACK 验证记录）
 
 ### 下一阶段前置条件
 
@@ -216,3 +216,55 @@ NEEDS_FIX
 2. **"环境搭建"类模块的 Review 要包含工具链完整性**：不只看测试代码，git/依赖管理/可复现性都是环境的一部分（本次 P1 即来自这里）
 3. **国内网络是长期约束**：Playwright CDN 镜像方案要沉淀进 README，CI（M9）里同样要配镜像，否则 GitHub Actions 国内 runner 会踩同一个坑
 4. **文档漂移要即时修**：README 状态节过期看似小事，但项目明文承诺"只记录实测事实"，过时的"待安装"同样是失真
+
+---
+---
+
+# M2 审查：Fixture + 参数化（2026-09-15）
+
+## 审查信息
+
+- 模块：M2 Fixture + 参数化重构
+- 审查范围：conftest.py、tests/ui/test_login.py、config/settings.py、MODULE_FEEDBACK M2 记录、git 提交 428b987、独立复跑
+- 审查方式：Reviewer 亲自复跑 + 逐文件走查 + 对照骨架承诺（data/.gitkeep、README 目录说明）
+
+## 独立复跑
+
+**5 passed in 45.82s，退出码 0**。第三次运行（Builder 36.32s / 本次 45.82s，波动 +26%）——公网 Demo 站时间数据必须看多次运行区间，不能看单点（M1 Review 已有同款结论，进一步坐实）。
+
+## 正确项
+
+1. **三层 fixture scope 决策正确**：browser session 共享省启停开销，page/context function 级隔离防用例间状态污染——性能与隔离的边界划在 context 上，不是拍脑袋
+2. **yield 前后置语义正确**：断言失败也保证 `context.close()`/`browser.close()` 执行，M1"断言挂了 close 走不到"的痛点就此消解
+3. **参数化有实测依据**：3 组错误凭证复用 M0"防枚举→统一 Invalid credentials"结论，错误用户名场景首次进入回归，不是凑数参数
+4. **性能对照诚实**：MODULE_FEEDBACK 明确记录"总时长没降反微升（用例多了 2 个），省的是 ~2s/例启停，大头是公网加载"——没有夸大 fixture 收益
+5. HEADLESS 配置化兑现 M1 Review 的 P3
+
+## 问题
+
+### P2 - 一般问题
+
+- **P2-1：data/ 目录承诺未兑现（文档与实现不一致）**
+  - 证据：`data/.gitkeep` 明写"M2 放登录负向参数组"，但参数组实际硬编码在 `test_login.py` 的 `parametrize` 装饰器内
+  - 影响：项目明文的"测试数据与代码分离"原则在 M2 未落地；后续模块若沿用此模式，data/ 将永久空置成摆设
+  - 修复建议：参数组外置到 data/ 模块（Python 模块即可，5 组数据不值得引入 YAML/JSON 解析依赖——KISS）
+
+### P3 - 优化建议
+
+1. `HEADLESS` 解析仅认 `"true"`：`ORANGEHRM_HEADLESS=1/yes` 会被当 false。文档注明只接受 true/false 即可，不必改代码
+2. 提交 428b987 显示 create+delete 而非 rename（重写幅度超 git 相似度阈值），`log --follow` 无法自动追溯——旧版仍可经 c93f61e 提取，非实质问题，记录即可
+3. 未来引入 pytest-xdist 并行时，session 级 browser 会每 worker 一份（预期行为，届时再评估，当前无 xdist 不算问题）
+
+## 审查结论
+
+### 当前状态
+
+**APPROVED_WITH_FIXES**（P2-1 顺手修复后即可转 APPROVED；P2 允许进入下一阶段但必须修复）
+
+### 面试能力评估
+
+- fixture scope 取舍：✅ conftest 注释 + 自评均有依据
+- yield teardown：✅
+- 参数化设计：✅ 有 M0 实测支撑
+- 性能归因：✅ 诚实（加分项）
+- 待观察：M3 POM 重构时对"何时抽象"的判断（不要为了 POM 而 POM）

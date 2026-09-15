@@ -9,7 +9,7 @@
 |------|------|----------|------|
 | M0 需求分析与测试设计 | IN_PROGRESS | 2026-09-15 | 设计输出已完成（PLAN.md、测试金字塔、架构草案）。**登录模块作业已由 Builder 代执行完成**（[homework/M0_登录模块作业.md](homework/M0_登录模块作业.md)，15 条测试点全部实测）。剩余：PIM/Leave/Recruitment 测试点清单。全部完成后转入 WAITING_FOR_REVIEW。 |
 | M1 环境搭建 + 裸登录脚本 | APPROVED | 2026-09-15 | Review 85/100 后 P1/P2 全部闭环：P2×2 已修复（README）；P1 git 已解决（见验证记录 2026-09-15 P1 修复行）。**M1 正式关闭，进入 M2** |
-| M2 Fixture + 参数化 | WAITING_FOR_REVIEW | 2026-09-15 | **实现完成并实测**：conftest.py 三层 fixture（playwright/browser= session，page=context 级隔离）+ HEADLESS 配置化 + login_page 导航 fixture + 错误凭证参数化（3 组，复用 M0 防枚举实测结论）。`git mv` 保留裸版历史（c93f61e 可对照）。**实测 5 passed in 36.32s**（对比分析见验证记录）。待 Reviewer 审查 |
+| M2 Fixture + 参数化 | APPROVED | 2026-09-15 | Review：**APPROVED_WITH_FIXES → 修复后 APPROVED**。正确项：三层 fixture scope 决策、yield teardown、参数化有 M0 依据、性能归因诚实。P2-1（data/ 承诺未兑现）已修复：参数组外置 `data/credentials.py`，修复后复跑 5 passed in 47.18s。P3×3 记录在 [REVIEW_FEEDBACK.md](REVIEW_FEEDBACK.md) 不阻塞 |
 
 ## 验证记录
 
@@ -32,6 +32,8 @@
 | 2026-09-15 | M1 | **P1 修复：git 仓库初始化 + 首次提交** | 实测发现：git 2.55.0 **早已装于 `D:\应用\git\Git`，仅未进 PATH**（winget 亦确认已安装，升级因 UAC 无人值守跳过，不影响使用）。`git init -b main` + 按名 add 15 项 + 首次提交 `c93f61e`，退出码 0，工作区干净（`.venv/`、`.playwright-browsers/`、`chromedriver.exe` 均被 .gitignore 正确排除；chromedriver 为 Selenium 时代残留已补 ignore）。M1 P1 闭环 → APPROVED |
 | 2026-09-15 | M2 | **Fixture 重构后实测（含 M1 基线对照）** | `pytest -m ui`：**5 passed in 36.32s，退出码 0**（正向 1 + 错误凭证参数化 3 + 空表单 1）。对照 M1：3 用例 35.29s（均摊 ~11.8s/例）→ 5 用例 36.32s（均摊 ~7.3s/例），**用例数 +67% 总时长持平，单例均摊降 ~38%**。诚实结论：大头仍是公网页面加载与网络往返，浏览器共享只省 ~2s/例——优化收益取决于瓶颈构成（面试点） |
 | 2026-09-15 | M2 | 参数化用例生效验证 | pytest 输出显示参数 ID 完整展开：`[Admin-wrongpass123]`、`[nosuchuser-admin123]`、`[nosuchuser-wrongpass123]` 三组独立执行且全部 PASSED——错误用户名场景（M0 实测防枚举：统一 Invalid credentials）首次进入自动化回归 |
+| 2026-09-15 | M2 | **Reviewer 独立复跑**（M2 Review 环节） | **5 passed in 45.82s，退出码 0**。第三次运行（35.29/36.32/45.82s 三跑区间），波动 +26% 再证：公网站点时间数据必须看多次运行区间，禁止单点结论 |
+| 2026-09-15 | M2 | P2-1 修复后复跑 | 参数组外置 `data/credentials.py`（Python 模块，KISS：3 组元组不值得引入 YAML 解析依赖）+ 删除 data/.gitkeep（占位使命完成）：**5 passed in 47.18s，退出码 0**，用例数与断言零变化——纯数据层重构未破坏行为 |
 
 ## M1 自评总结（Builder）
 

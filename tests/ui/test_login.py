@@ -17,6 +17,7 @@ import pytest
 from playwright.sync_api import expect
 
 from config import settings
+from data.credentials import INVALID_CREDENTIAL_CASES
 
 pytestmark = pytest.mark.ui  # 分层 marker：CI 里 pytest -m ui 只跑 UI 层
 
@@ -38,14 +39,7 @@ def test_login_valid_credentials(login_page):
     expect(login_page).to_have_url(re.compile(r"/dashboard/index"))
 
 
-@pytest.mark.parametrize(
-    ("username", "password"),
-    [
-        ("Admin", "wrongpass123"),      # 错误密码
-        ("nosuchuser", "admin123"),     # 错误用户名
-        ("nosuchuser", "wrongpass123"), # 双双错误
-    ],
-)
+@pytest.mark.parametrize(("username", "password"), INVALID_CREDENTIAL_CASES)
 def test_login_invalid_credentials(login_page, username, password):
     # LOGIN-02：任何错误组合 → 统一提示（M0 实测：防用户枚举）
     login_page.get_by_placeholder("Username").fill(username)
