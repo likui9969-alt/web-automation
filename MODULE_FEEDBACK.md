@@ -10,6 +10,7 @@
 | M0 需求分析与测试设计 | IN_PROGRESS | 2026-09-15 | 设计输出已完成（PLAN.md、测试金字塔、架构草案）。**登录模块作业已由 Builder 代执行完成**（[homework/M0_登录模块作业.md](homework/M0_登录模块作业.md)，15 条测试点全部实测）。剩余：PIM/Leave/Recruitment 测试点清单。全部完成后转入 WAITING_FOR_REVIEW。 |
 | M1 环境搭建 + 裸登录脚本 | APPROVED | 2026-09-15 | Review 85/100 后 P1/P2 全部闭环：P2×2 已修复（README）；P1 git 已解决（见验证记录 2026-09-15 P1 修复行）。**M1 正式关闭，进入 M2** |
 | M2 Fixture + 参数化 | APPROVED | 2026-09-15 | Review：**APPROVED_WITH_FIXES → 修复后 APPROVED**。正确项：三层 fixture scope 决策、yield teardown、参数化有 M0 依据、性能归因诚实。P2-1（data/ 承诺未兑现）已修复：参数组外置 `data/credentials.py`，修复后复跑 5 passed in 47.18s。P3×3 记录在 [REVIEW_FEEDBACK.md](REVIEW_FEEDBACK.md) 不阻塞 |
+| M3 POM | APPROVED | 2026-09-15 | pages/login_page.py 激活 POM：定位器 7→0 处散落、URL/操作语义收编、断言分层取舍有注释。**过程中遭遇真实 flaky**：公网过载致 goto 随机超时（同代码 5P 与 3P+2E 并存），经 wait_until=domcontentloaded + 超时 20s 校准双修复后稳定 5 passed。全程排障记录见验证记录（面试黄金素材） |
 
 ## 验证记录
 
@@ -34,6 +35,11 @@
 | 2026-09-15 | M2 | 参数化用例生效验证 | pytest 输出显示参数 ID 完整展开：`[Admin-wrongpass123]`、`[nosuchuser-admin123]`、`[nosuchuser-wrongpass123]` 三组独立执行且全部 PASSED——错误用户名场景（M0 实测防枚举：统一 Invalid credentials）首次进入自动化回归 |
 | 2026-09-15 | M2 | **Reviewer 独立复跑**（M2 Review 环节） | **5 passed in 45.82s，退出码 0**。第三次运行（35.29/36.32/45.82s 三跑区间），波动 +26% 再证：公网站点时间数据必须看多次运行区间，禁止单点结论 |
 | 2026-09-15 | M2 | P2-1 修复后复跑 | 参数组外置 `data/credentials.py`（Python 模块，KISS：3 组元组不值得引入 YAML 解析依赖）+ 删除 data/.gitkeep（占位使命完成）：**5 passed in 47.18s，退出码 0**，用例数与断言零变化——纯数据层重构未破坏行为 |
+| 2026-09-15 | M3 | POM 重构首跑 | **2 passed + 3 errors（goto 超时 ×3，10s）**。已过的 2 用例证明 POM 逻辑正确，失败全在 setup 的 goto——判定公网过载而非代码问题 |
+| 2026-09-15 | M3 | 二跑（确认问题性质） | 1 failed + 4 passed，失败现场页面被带到 www.orangehrm.com（过载跳转痕迹）。两跑不稳定组合：环境故障坐实 |
+| 2026-09-15 | M3 | **修复 1：wait_until 策略** | `goto` 默认等 load（全部资源），SPA 只需 DOM ready。改 `wait_until="domcontentloaded"` 后 **5 passed in 35.43s**（正确等待条件优于无脑加大超时，且更快） |
+| 2026-09-15 | M3 | **Reviewer 独立复跑（M3 Review）** | 同一代码 Reviewer 跑出 **3 passed + 2 errors**（goto 仍超时）——Builder 5P / Reviewer 3P+2E 并存，坐实时段性过载。Review 价值实证：环境波动只有独立复跑才能暴露 |
+| 2026-09-15 | M3 | **修复 2：超时预算校准** | DEFAULT_TIMEOUT 10→20s（注释留痕实测依据：过载时 DOM ready >10s）。环境参数按实测校准，非放宽断言标准（AGENTS §14 合规）。**最终 5 passed in 43.24s，退出码 0** |
 
 ## M1 自评总结（Builder）
 

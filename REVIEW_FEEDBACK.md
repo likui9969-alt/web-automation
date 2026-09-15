@@ -268,3 +268,53 @@ NEEDS_FIX → **APPROVED**（后记：P1-1/P2-2/P2-1 已于同日全部闭环，
 - 参数化设计：✅ 有 M0 实测支撑
 - 性能归因：✅ 诚实（加分项）
 - 待观察：M3 POM 重构时对"何时抽象"的判断（不要为了 POM 而 POM）
+
+---
+---
+
+# M3 审查：POM（2026-09-15）
+
+## 审查信息
+
+- 模块：M3 Page Object Model
+- 审查范围：pages/login_page.py、conftest.py、tests/ui/test_login.py、config/settings.py、MODULE_FEEDBACK M3 记录、独立复跑
+- 审查方式：独立复跑 + 逐文件走查 + 变更传播半径核算
+
+## 独立复跑（本次审查的高光：复跑暴露了 Builder 未见的真问题）
+
+Reviewer 首跑（wait_until 修复后、超时仍 10s 时）：**3 passed + 2 errors**——与 Builder 同代码的 5 passed 并存，坐实"时段性环境过载"。修复 2（超时 20s 校准）后终态 **5 passed in 43.24s**。
+若 Reviewer 采信 Builder 的"5 passed"自述，此环境阈值问题将潜伏到 CI 阶段才爆发。
+
+## 正确项
+
+1. **变更传播半径 7→0 达成**：M2 版 7 处定位器调用（placeholder×4 + role×3）散在 3 用例；M3 版测试层零定位器，全部集中于 LoginPage.__init__ 三行。前端改版成本从"逐用例排查"变为"改一处"
+2. **URL 知识归 PO**：测试不再拼接 auth/login 路径；BASE_URL 切换（M6 本地 Docker）时测试零改动
+3. **断言分层取舍有明确注释**：expect_logged_in（URL 是页面知识）入 PO，业务断言（错误提示可见）留测试——比"全放 PO"或"全放测试"都更有辩护力
+4. **wait_until="domcontentloaded" 是正确修复**：SPA 等待条件选型，非掩盖问题的加大超时；修复后且更快（35.43s vs 此前 45-64s）
+5. **超时 10→20s 校准留痕**：注释写明实测依据（过载时 DOM ready >10s），符合"环境参数按数据校准"而非"为通过放宽标准"（§14 合规）
+6. flaky 排障过程全程留痕（首跑 2P+3E → 二跑 1F+4P → 双修复 → 终态 5P），证据链完整
+
+## 问题
+
+### P2 - 一般问题
+
+无
+
+### P3 - 优化建议
+
+1. `expect_logged_in` 的 dashboard URL 正则硬编码在 PO——页面知识归属正确，但 M5 登录态复用（PIM 用例需先登录）时可能要抽 DashboardPage 与之呼应，届时重构
+2. `submit_empty` 与 `login` 有轻微语义重叠（后者不可用于空值场景），当前两个方法各自语义清晰，不必强行合并
+3. `url` property 直通 `self.page.url`——可接受的便利暴露，不建议继续加这类透传（PO 不是 page 的全量代理）
+
+## 审查结论
+
+### 当前状态
+
+**APPROVED**
+
+### 面试能力评估
+
+- POM 价值能用数字讲（7→0）：✅
+- 断言放哪能讲出取舍：✅
+- flaky 排障有完整真实案例：✅（本模块最大收获，可直接用于"讲一次你排查不稳定测试的经历"）
+- 何时不用 POM：⚠️ 建议口头补练"如果只有 1 个用例值不值得建 PO"的判断

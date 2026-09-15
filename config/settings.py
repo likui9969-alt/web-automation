@@ -14,8 +14,9 @@ BASE_URL = os.getenv("ORANGEHRM_BASE_URL", "https://opensource-demo.orangehrmliv
 USERNAME = os.getenv("ORANGEHRM_USERNAME", "Admin")
 PASSWORD = os.getenv("ORANGEHRM_PASSWORD", "admin123")
 
-# 全局默认等待秒数。M0 实测发现 SPA 提交后有 1~3 秒重渲染瞬态，
-# Playwright 的自动等待会基于此超时反复探测元素出现，禁止用固定 sleep。
-DEFAULT_TIMEOUT = int(os.getenv("ORANGEHRM_TIMEOUT", "10"))
+# 全局默认等待秒数。M0 实测 SPA 提交后有 1~3 秒重渲染瞬态。
+# 2026-09-15 晚高峰实测：Demo 站过载时 goto 连 domcontentloaded 都 >10s，
+# 10s 预算不足 → 提到 20s（环境参数按实测校准，非放宽断言标准）。
+DEFAULT_TIMEOUT = int(os.getenv("ORANGEHRM_TIMEOUT", "20"))
 # 有头/无头：调试失败用例时 ORANGEHRM_HEADLESS=false 看着浏览器跑，不用改代码
 HEADLESS = os.getenv("ORANGEHRM_HEADLESS", "true").lower() == "true"

@@ -18,6 +18,7 @@ import pytest
 from playwright.sync_api import sync_playwright
 
 from config import settings
+from pages.login_page import LoginPage
 
 
 @pytest.fixture(scope="session")
@@ -40,3 +41,9 @@ def page(browser):
     page.set_default_timeout(settings.DEFAULT_TIMEOUT * 1000)
     yield page
     context.close()
+
+
+@pytest.fixture
+def login_page(page) -> LoginPage:
+    """打开登录页并返回 Page Object——用例从此不知 URL、不知定位器。"""
+    return LoginPage(page).open()
