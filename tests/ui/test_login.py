@@ -9,15 +9,21 @@
 - LOGIN-02 错误凭证（参数化 ×3）→ Invalid credentials
 - LOGIN-03 空表单 → 两处 Required
 """
+import allure
 import pytest
 from playwright.sync_api import expect
 
 from config import settings
 from data.credentials import INVALID_CREDENTIAL_CASES
 
-pytestmark = pytest.mark.ui  # 分层 marker：CI 里 pytest -m ui 只跑 UI 层
+pytestmark = [
+    pytest.mark.ui,  # 分层 marker：CI 里 pytest -m ui 只跑 UI 层
+    allure.feature("登录（UI 关键路径）"),  # M8：报告按业务模块归类
+]
 
 
+@allure.title("正确凭证登录成功进入仪表盘")
+@allure.severity(allure.severity_level.CRITICAL)
 def test_login_valid_credentials(login_page):
     # LOGIN-01：正确账号密码 → 登录成功
     login_page.login(settings.USERNAME, settings.PASSWORD)
@@ -25,6 +31,8 @@ def test_login_valid_credentials(login_page):
 
 
 @pytest.mark.parametrize(("username", "password"), INVALID_CREDENTIAL_CASES)
+@allure.title("错误凭证登录被拒绝（防枚举统一报错）")
+@allure.severity(allure.severity_level.NORMAL)
 def test_login_invalid_credentials(login_page, username, password):
     # LOGIN-02：任何错误组合 → 统一报错且不跳转（M0 实测：防用户枚举）
     login_page.login(username, password)
@@ -34,6 +42,8 @@ def test_login_invalid_credentials(login_page, username, password):
     assert "/auth/login" in login_page.url
 
 
+@allure.title("空表单提交被前端校验拦截")
+@allure.severity(allure.severity_level.NORMAL)
 def test_login_empty_fields(login_page):
     # LOGIN-03：空表单提交 → 前端校验拦截，两个字段各自 Required
     login_page.submit_empty()

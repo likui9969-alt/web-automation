@@ -53,25 +53,40 @@ def pytest_configure(config):
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_makereport(item, call):
-    """收录失败用例 nodeid（setup/call 任一失败都算——teardown 留痕用）。"""
+    """收录失败用例 nodeid（setup/call 任一失败都算——teardown 留痕用）。
+
+    截图必须在此处（call 失败时）执行：fixture teardown 时 Allure 的测试
+    上下文已关闭，attach 会被静默丢弃（M8 实测踩坑）。截图取 item 上
+    page fixture 存的 page 引用，attach 到本用例的 Allure result。
+    """
     if call.when in ("setup", "call") and call.excinfo is not None:
         item.config.m7_failed_nodeids.add(item.nodeid)
+        if call.when == "call" and call.excinfo is not None:
+            page = getattr(item, "_m7_page", None)
+            if page is not None:
+                import allure
+                from allure_commons.types import AttachmentType
+
+                paths = make_artifact_paths(item.nodeid)
+                try:
+                    page.screenshot(path=str(paths["screenshot"]), full_page=True)
+                    # M8：失败现场截图作为 Allure 附件（报告里直接可见，5 分钟定位入口）
+                    allure.attach.file(
+                        str(paths["screenshot"]), name="failure_screenshot",
+                        attachment_type=AttachmentType.PNG)
+                except Exception as exc:  # 留痕失败不掩盖原始失败
+                    print(f"[M7] 截图失败（已跳过，不掩盖原失败）: {exc}")
 
 
-def _dump_failure_artifacts(request, page, context, netlog):
-    """失败现场留痕（M7）：截图 + Playwright Trace + 浏览器请求/响应日志。
+def _dump_failure_artifacts(request, context, netlog):
+    """失败现场留痕（M7）：Playwright Trace + 浏览器请求/响应日志。
 
-    顺序敏感：必须在本 fixture 的 context.close() 之前执行（页面还活着才能截）。
-    成功用例不走这里——成功路径无产物，报告不被成功噪音污染。
+    截图由 pytest_runtest_makereport（call 阶段）处理并进 Allure 报告；
+    此处负责 trace 与浏览器网络日志落盘。所有留痕失败都不掩盖原始失败。
     """
     from utils.failure_artifacts import API_LOG
 
     paths = make_artifact_paths(request.node.nodeid)
-    try:
-        page.screenshot(path=str(paths["screenshot"]), full_page=True)
-    except Exception as exc:  # 留痕失败不能掩盖原始失败原因
-        paths["screenshot"] = None
-        print(f"[M7] 截图失败（已跳过，不掩盖原失败）: {exc}")
     try:
         context.tracing.stop(path=str(paths["trace"]))
     except Exception as exc:
@@ -107,10 +122,14 @@ def _new_page_with_tracing(browser, **context_kwargs):
     return context, page, netlog
 
 
-def _teardown_page_flow(request, context, page, netlog):
-    """context 收尾：失败 → 留痕（截图/Trace/netlog），成功 → 丢弃 trace。"""
+def _teardown_page_flow(request, context, netlog):
+    """context 收尾：失败 → 留痕（Trace/netlog），成功 → 丢弃 trace。
+
+    截图不在这里做（M8 实测：Allure 测试上下文已关闭，attach 被静默丢弃）——
+    失败截图由 pytest_runtest_makereport 在 call 阶段处理并 attach 到报告。
+    """
     if request.node.nodeid in request.config.m7_failed_nodeids:
-        _dump_failure_artifacts(request, page, context, netlog)
+        _dump_failure_artifacts(request, context, netlog)
     else:
         context.tracing.stop()  # 成功：丢弃 trace（不产磁盘垃圾）
     context.close()
@@ -141,10 +160,15 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
 
 @pytest.fixture
 def page(browser, request):
-    """匿名浏览器页（登录测试专用）。M7 起带失败留痕：失败 → 截图/Trace/log。"""
+    """匿名浏览器页（登录测试专用）。M7 起带失败留痕：失败 → 截图/Trace/log。
+
+    _m7_page 挂 item：让 pytest_runtest_makereport 在 call 失败时能取到
+    page 截图（fixture teardown 时 Allure 上下文已关闭，attach 会丢——M8 实测）。
+    """
     context, page, netlog = _new_page_with_tracing(browser)
+    request.node._m7_page = page
     yield page
-    _teardown_page_flow(request, context, page, netlog)
+    _teardown_page_flow(request, context, netlog)
 
 
 @pytest.fixture
@@ -223,8 +247,9 @@ def ui_auth_page(browser, ui_auth_state, request):
     绝不能用本 fixture——那等于把被测前提变成了注入的假状态）。
     """
     context, page, netlog = _new_page_with_tracing(browser, storage_state=ui_auth_state)
+    request.node._m7_page = page  # 供 makereport 失败截图（同 page fixture）
     yield page
-    _teardown_page_flow(request, context, page, netlog)
+    _teardown_page_flow(request, context, netlog)
 
 
 # ---- M6：DB 校验层（仅本地 Docker 环境）----

@@ -61,6 +61,12 @@ python -m pytest -m ui        # 只跑 UI 层
 python -m pytest -m api       # 只跑 API 层（M4 起）
 python -m pytest -m e2e       # UI+API 混合闭环（M5 起）
 python -m pytest              # 全量
+
+# 4. Allure 报告（M8 起；pytest 运行已自动写 reports/allure-results，
+#    HTML 生成需 allure CLI：npm install -g allure-commandline）
+allure generate reports/allure-results -o reports/allure-report --clean
+allure open reports/allure-report   # 浏览器打开报告
+# 注意：失败用例的现场截图（M7 留痕）会自动作为附件进入报告
 ```
 
 ### 本地 Docker 环境（M6 起，含 DB 校验）

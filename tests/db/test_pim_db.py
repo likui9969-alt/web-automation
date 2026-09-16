@@ -21,12 +21,16 @@ API 返回 200、UI 显示 "Successfully Saved"，数据就真的持久化正确
   属 API 响应可见事实（响应体含 employeeId: None），不构成 DB 层论据——
   M6 独立复审 P2-2 修正，代码注释同步改正
 """
+import allure
 import pytest
 
 from api.pim import PIMApi
 from utils.factory import make_employee
 
-pytestmark = pytest.mark.db
+pytestmark = [
+    pytest.mark.db,
+    allure.feature("DB 持久化校验（M6，仅本地环境）"),  # M8：报告按业务模块归类
+]
 
 _ROW_BY_EMP_NUMBER = (
     "SELECT emp_number, emp_firstname, emp_lastname, purged_at "
@@ -40,6 +44,8 @@ def pim_api(api_client) -> PIMApi:
     return PIMApi(api_client)
 
 
+@allure.title("API 创建员工 → 数据库中行存在且字段一致")
+@allure.severity(allure.severity_level.CRITICAL)
 def test_api_created_employee_persisted_in_db(db_client, pim_api):
     """API 创建员工 → hs_hr_employee 行存在且字段一致。
 
@@ -65,6 +71,8 @@ def test_api_created_employee_persisted_in_db(db_client, pim_api):
         pim_api.delete_employee(emp_number)
 
 
+@allure.title("API 删除员工 → 数据库中行物理消失（硬删）")
+@allure.severity(allure.severity_level.CRITICAL)
 def test_api_deleted_employee_removed_from_db(db_client, pim_api):
     """API 删除员工 → DB 行物理移除（硬删）。
 
