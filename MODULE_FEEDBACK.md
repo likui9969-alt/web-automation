@@ -14,9 +14,9 @@
 | M4 API 层 | APPROVED | 2026-09-15 | **六轮探测证伪链**（表单无 token→JSON 405→UA 无效→Playwright 网络监听抓真相）：登录=Vue 壳 `<auth-login :token>` 提取 + POST /auth/validate；API 真实路径含 /web/index.php 前缀（M0 抓包漏记）。api/client.py + api/pim.py 语义封装，**API 层 5 passed in 14.34s（vs UI 同规模 43.24s，3 倍速差=金字塔实测证据）**。全量 10 passed in 65.40s；conftest setdefault 彻底修复浏览器路径依赖（M1 P2-1 终闭环）。**Review APPROVED_WITH_FIXES → P2-1（PIMApi base_url 一致性）修复后复跑 5 passed 16.57s → APPROVED 终态，M4 关闭** |
 | M5 UI+API 混合造数 | APPROVED | 2026-09-15 | 数据工厂（utils/factory.py 唯一命名）+ api/pim.py 增 create/delete/search_by_name（探测实证）+ conftest 会话复用（api_client session 级 + ui_auth_state cookie 注入，收编 M4 P3-1）+ pages/pim_page.py + tests/e2e/ 两条混合闭环用例。**过程中两次真实排障**：①Save 后竞态（前端先发 unique 校验再 POST，~2s 延迟）→ toast 语义等待修复；②全量暴露 expect 断言 5s 盲区（不受 set_default_timeout 影响）→ 断言超时校准。终态 **e2e 2 passed；全量 12 passed**（Builder 111.68s / Reviewer 104.26s 双绿）。**Review APPROVED_WITH_FIXES → P2-1（E2E-02 失败安全清理）修复后复跑 2 passed 31.83s + 残留核验 0 → APPROVED 终态，M5 关闭** |
 | M6 本地部署 + DB 校验 | APPROVED_WITH_FIXES | 2026-09-16 | docker-compose 拉起 OrangeHRM 5.9 + MySQL 8.0；**发现 5.x 有配置驱动的无人值守安装器**（cli_install.php，console 版纯交互式；安装后自动删除含明文密码的 yaml）→ 171 表落库；utils/db_client.py（pymysql 只读、参数化、最小权限账号 ohrm_ro）+ tests/db/ 两条持久化校验 + conftest db_client 环境门控。**两次真实排障**：解释器错位 → 项目 venv；localhost cookie domain 陷阱 → domain 取 BASE_URL host。**状态历程**：第一轮独立复审 NEEDS_FIX（P1-1 门控假红 / P1-2 公网 flake / P1-3 门禁自证，原 APPROVED 因审查节代笔被所有者作废）→ Builder 全部整改 → **第二轮独立复审（2026-09-16）APPROVED_WITH_FIXES：P1 全清零（审查方实测 8 组），M6 关闭，M7 允许开工**。硬性闭环点：P2-1 重试可观测性（已闭环）+ P2-2 度量机制化与 requests 层策略（M9 准入前）+ P2-3 分页/清理（已闭环） |
-| M7 失败定位体系 | WAITING_FOR_REVIEW | 2026-09-16 | 失败自动留痕四件套（conftest hook）：**截图**（page.screenshot 失败现场）+ **Playwright Trace**（全程录制、失败导出、成功丢弃）+ **浏览器请求/响应 netlog**（page.on req/resp）+ **API 请求/响应日志**（requests.Session hooks → 全局记录，teardown dump）。产物按 nodeid+时间戳命名落 reports/{screenshots,traces,logs}（已 gitignore）。terminal summary 输出留痕汇总（含 goto 重试计数）。**故意制造失败实测**：UI 断言失败/goto 失败/e2e 造数后失败三类 → 截图(png 非空)、Trace(zip 27 条目含 network+快照)、netlog(JSON)、api_log(登录 GET 200→POST 302 全程) 全部真实生成；**成功用例零产物**（全量后 reports 仅 .gitkeep）；探针已删 |
-| M8 Allure 报告 | WAITING_FOR_REVIEW | 2026-09-16 | allure-pytest 2.16.0 + allure CLI 2.43.0（npm 镜像装）。**四元素落地**：feature（4 个业务模块归类 via pytestmark）、title（每条用例中文可读）、severity（critical 8 + normal 10，按业务价值分级）、attachment（失败现场截图进报告——**关键坑**：fixture teardown 时 Allure 上下文已关闭 attach 被静默丢弃，改在 pytest_runtest_makereport 的 call 阶段截图+attach，实测 attachment 正确关联 failed 用例）。pytest.ini `--alluredir=reports/allure-results`。**实测**：全量 18 passed + 1 xfailed → allure generate → HTML 成功生成，19 用例按 4 feature 汇总、severity 正确。README 补报告用法（含 CLI 安装） |
-| M9 GitHub Actions CI | WAITING_FOR_REVIEW | 2026-09-16 | .github/workflows/test.yml：push/pull_request 触发，分层执行（API 快先反馈 → UI → e2e），always 上传 allure-results、failure 上传 M7 留痕；**浏览器路径坑**：conftest setdefault 会覆盖 CI 浏览器路径（本机约定 vs runner），workflow 显式声明。**P2-2 硬性闭环**：① CI 目标环境策略显式化（固定公网 Demo + DB 门控 skip；不选本地 Docker 的理由与 requests 层不加重试的策略决策写入 README CI 节）② flake 度量机制化 `scripts/flake_measure.ps1`（同命令 ×N + 结果模板 + goto 重试计数位置），实测公网 api ×3 = 3/3 PASS（29.9/29.5/30.1s） |
+| M7 失败定位体系 | NEEDS_FIX | 2026-09-16 | 失败自动留痕四件套（conftest hook）：**截图**（page.screenshot 失败现场）+ **Playwright Trace**（全程录制、失败导出、成功丢弃）+ **浏览器请求/响应 netlog**（page.on req/resp）+ **API 请求/响应日志**（requests.Session hooks → 全局记录，teardown dump）。产物按 nodeid+时间戳命名落 reports/{screenshots,traces,logs}（已 gitignore）。terminal summary 输出留痕汇总（含 goto 重试计数）。**故意制造失败实测**：UI 断言失败/goto 失败/e2e 造数后失败三类 → 截图(png 非空)、Trace(zip 27 条目含 network+快照)、netlog(JSON)、api_log(登录 GET 200→POST 302 全程) 全部真实生成；**成功用例零产物**（全量后 reports 仅 .gitkeep）；探针已删。**M7–M9 联合独立复审（2026-09-16）判 NEEDS_FIX**：P1-1 跨层留痕缺失（api/db 失败零留痕）+ P2×3（netlog 无兜底 / api_log 无关联键 / goto 失败截图静默缺失）+ P3×5。**Builder 整改完成（P1-1 收口 makereport + P2-1/2-2/2-3 + P3 顺带）**，详见文末「Review 整改记录」节 |
+| M8 Allure 报告 | APPROVED_WITH_FIXES | 2026-09-16 | allure-pytest 2.16.0 + allure CLI 2.43.0（npm 镜像装）。**四元素落地**：feature（4 个业务模块归类 via pytestmark）、title（每条用例中文可读）、severity（critical 8 + normal 10，按业务价值分级）、attachment（失败现场截图进报告——**关键坑**：fixture teardown 时 Allure 上下文已关闭 attach 被静默丢弃，改在 pytest_runtest_makereport 的 call 阶段截图+attach，实测 attachment 正确关联 failed 用例）。pytest.ini `--alluredir=reports/allure-results`。**实测**：全量 18 passed + 1 xfailed → allure generate → HTML 成功生成，19 用例按 4 feature 汇总、severity 正确。README 补报告用法（含 CLI 安装）。**联合复审 APPROVED_WITH_FIXES**：P2 均继承 M7（attachment 覆盖面随 M7 修复一并解决），关闭须排在 M7 之后 |
+| M9 GitHub Actions CI | NEEDS_FIX | 2026-09-16 | .github/workflows/test.yml：push/pull_request 触发，分层执行（API 快先反馈 → UI → e2e），always 上传 allure-results、failure 上传 M7 留痕。**P2-2 硬性闭环**：① CI 目标环境策略显式化（固定公网 Demo + DB 门控 skip；不选本地 Docker 的理由与 requests 层不加重试的策略决策写入 README CI 节）② flake 度量机制化 `scripts/flake_measure.ps1`（同命令 ×N + 结果模板 + goto 重试计数位置），实测公网 api ×3 = 3/3 PASS（29.9/29.5/30.1s）。**M7–M9 联合独立复审（2026-09-16）判 NEEDS_FIX**：P0 浏览器路径写法（`~` 在 bash 双引号内不展开 + Playwright 不认 `~` → CI UI/e2e 必全 error）+ P2×3（DB 层 CI 零覆盖 / 度量脚本 Windows-only / 三层调用无 if:always 吞层）+ P3×3 + 真实 Actions 触发 **UNVERIFIED**（本机网络不可达，M11 上仓时闭环）。**Builder 整改完成（P0 代码级+文件级双保险 / P2×3 / P3 顺带）**，详见文末「Review 整改记录」节 |
 
 ## 验证记录
 
@@ -105,6 +105,10 @@
 | 2026-09-16 | M9 | workflow 编写 + act 语法校验 | .github/workflows/test.yml 完成（分层 job + artifact 上传 + 浏览器路径修复）。act 0.2.89（winget nektos.act）`act -l` 语法校验通过：识别 job "test"；**act 完整执行尝试：镜像 catthehacker/ubuntu:act-22.04 拉起成功，job 框架正常，但 clone actions/setup-python@v5 时本机 GitHub 网络超时**（github.com 不可达，M1 已知约束）→ 真实 GitHub Actions 触发 **UNVERIFIED**（需 GitHub 远程仓库 + 网络，M11 上仓时闭环） |
 | 2026-09-16 | M9 | **P2-2 闭环验证：flake 度量脚本** | `scripts/flake_measure.ps1 -Runs 3 -Marker api` 实测公网：**3/3 PASS（29.88s / 29.54s / 30.11s）**——同命令 ×N 可复跑 + 逐次结果 + 汇总成功率 + goto 重试计数（本次 0），固定输出模板供 MODULE_FEEDBACK 记录。修复一处空数组索引 bug（Where-Object 无匹配时 Count=0） |
 | 2026-09-16 | M9 | flake 记录（首次，用新脚本） | 公网 api 3/3 通过（29.9~30.1s，本地 api 9 条基线）；goto 重试计数 0。公网全量另见 M6 记录（14P+2S+2F，requests 瞬态重跑即过） |
+| 2026-09-16 | M7 | **P1-1 整改：留痕收口 makereport（三探针不利条件实测）** | 探针①仅 API 层失败 → **api_log 落盘**（修复前零留痕）✓；探针②setup fixture 失败 → trace+netlog+api_log ✓；探针③UI call 失败 → 截图+trace+netlog+api_log 四件套 ✓。**回归抓到两类误记并修复**：①skip 用例（DB 门控 Skipped 异常也走 excinfo 非 None）→ 加 skip 类型排除；②xfail strict canary 失败 excinfo 是 AssertionError 非 XFailed → 加 xfail marker 排除。修复后全量 18 passed + 1 xfailed，reports 仅 .gitkeep（成功/xfail 零留痕） |
+| 2026-09-16 | M9 | **P0 整改：浏览器路径代码级根治** | conftest setdefault 改「仅当项目内 .playwright-browsers 存在才设置」（M4 修复不回退，CI runner 用 Playwright 默认路径）；workflow 同步改 `$HOME/.cache/ms-playwright`（bash 双引号内展开）——文件级+代码级双保险。本机验证：`import conftest` 后 PLAYWRIGHT_BROWSERS_PATH=项目内路径（存在才设分支生效） |
+| 2026-09-16 | M9 | **P2/P3 整改：workflow 收敛 + 双平台度量** | workflow 加 `concurrency`（同分支取消旧运行）+ UI/e2e 步加 `if: always()`（API 红也在本轮拿到全层结果）+ 注释更新；README 补「DB 层 CI 零覆盖」显式声明（后果+补齐条件）；新增 `scripts/flake_measure.sh`（bash 版，与 ps1 输出口径一致，Linux/CI 可复跑）——git bash `-n` 语法检查 exit=0 |
+| 2026-09-16 | M7 | **P2-2/P2-3/P3 整改（探针验证）** | api_log 加 `ts`（毫秒时间戳）+ `nodeid`（pytest_runtest_setup 更新 CURRENT_NODEID）——探针失败用例 JSON 实测：GET 200/POST 302 均带 ts+nodeid，可按用例过滤 ✓；netlog 补 `elapsed_ms` + `content_type`；截图独立 5s 超时（站点不可达时不再白等 20s）；terminal summary 显式列出产物缺失原因（API 层失败显示「no page fixture (API/DB 层)」）；make_artifact_paths 自建目录 + 毫秒时间戳（P3-2/P3-3） |
 
 ## M1 自评总结（Builder）
 
@@ -266,3 +270,83 @@
 
 **APPROVED_WITH_FIXES（二轮独立复审出具）→ M6 关闭，M7 允许开工**。
 待办：P2-2 为 M9 准入硬性前置；P3-7（DB 覆盖 UI 路径）与 Playwright 选型理由登记后续模块。
+
+---
+
+## M7–M9 Review 整改记录（2026-09-16，联合独立复审）
+
+> 联合复审（REVIEW_FEEDBACK「M7–M9 独立复审」节）判：M7 NEEDS_FIX（P1×1+P2×3）、
+> M8 APPROVED_WITH_FIXES（依赖 M7）、M9 NEEDS_FIX（P0×1+P2×3）、跨模块 P1-C。
+> 本节为 Builder 整改事实源（原文零删改）。**P1-C 的前两条（探针残留/工作区洁净）
+> 已通过：探针用后即删、提交不含 M10 WIP；门禁顺序违规为历史事实，记录在案。**
+
+### Reviewer 提出的问题（逐条）
+
+- R-01 P1：纯 API/DB 层失败零留痕（dump 只挂 page fixture）——**与自述"API 日志是唯一现场"矛盾**
+- R-02 P2：netlog 写入无兜底 + 目录相对/绝对两套路径来源（CWD≠根时 1 failed 放大成 1 failed+1 error 并吞汇总）
+- R-03 P2：api_log 全 session 扁平列表，无 ts/nodeid，失败用例日志无法过滤
+- R-04 P2：goto 失败截图静默缺失、原因不可见
+- R-05 P0：`PLAYWRIGHT_BROWSERS_PATH=~/.cache/...` 在 bash 双引号内不展开 + Playwright 不认 `~` → CI UI/e2e 必全 error
+- R-06 P2：CI 不执行 DB 层，canary 报警价值为 0
+- R-07 P2：flake_measure.ps1 Windows-only，CI（ubuntu）无法复跑
+- R-08 P2：三层 pytest 独立调用，任一层失败后续层被跳过
+- R-09 P1-C：审查窗口工作区≠提交态；探针残留；门禁顺序第 3/4 次违规
+- R-10 P3：netlog 只记 method/url/status（无 elapsed/content-type）
+- R-11 P3：make_artifact_paths 不负责建目录（不自洽）
+- R-12 P3：无 concurrency，同分支连推并发跑满 runner
+- R-13 P3：时间戳只到秒，rerun 会覆盖
+- R-14 P3：m7_failed_nodeids 在 config 上，xdist 需 per-worker
+- R-15 P3：产物无清理策略
+- R-16 P3：item._m7_page 隐式耦合（建议 stash/收集器）
+- R-17 P3：延迟 import allure 保护有限
+
+### Builder 判断
+
+- R-01~R-13：**同意** → 已执行（R-01/R-02 上一轮先行完成）
+- R-14：**不同意执行** → 项目无 xdist（requirements/pytest.ini 均无），YAGNI，登记不阻塞
+- R-15：**不同意执行** → 登记 M11（报告/留痕本质是保留现场，清理属运维策略，本轮不做）
+- R-16：**不同意执行** → 多属性已统一收口在 conftest 且验证过（page/context/netlog 挂 item），
+  stash 重构是优化非必要（KISS），维持现状并记录
+- R-17：**同意但记录** → allure-pytest 已入 requirements，延迟 import 只是防御，不改
+
+### 已执行修改
+
+1. conftest.py：留痕收口 `pytest_runtest_makereport`（R-01，覆盖全部 4 层：任意失败落 api_log，
+   浏览器用例另加截图/trace/netlog）；skip/xfail 双排除（实测抓到的两类误记边界）
+2. conftest.py：目录统一 `REPORTS_DIR` + netlog/api_log 写文件 try/except + append 提前（R-02）
+3. conftest.py + utils/failure_artifacts.py：api_log 加 ts+nodeid，pytest_runtest_setup 更新
+   CURRENT_NODEID（R-03）；截图独立 5s 超时 + terminal summary 显式打印缺失原因（R-04）；
+   netlog 补 elapsed_ms/content_type（R-10）；make_artifact_paths 自建目录 + 毫秒时间戳（R-11/R-13）
+4. conftest.py：setdefault 条件化（仅项目内 .playwright-browsers 存在才设，R-05 代码级）
+5. .github/workflows/test.yml：路径改 `$HOME`（R-05 文件级）+ concurrency（R-12）+ UI/e2e 步
+   `if: always()`（R-08）
+6. README.md：DB 层 CI 零覆盖显式声明（R-06）+ flake 度量双平台说明（R-07）
+7. scripts/flake_measure.sh（新）：bash 版度量脚本（R-07，与 ps1 输出口径一致）
+
+### 未执行建议
+
+- R-14（xdist）：登记，无此需求
+- R-15（清理策略）：登记 M11
+- R-16（stash 重构）：维持现状（已统一收口，功能完备）
+- R-17（延迟 import）：维持现状（记录）
+
+### 修改后的实际验证（2026-09-16）
+
+| 运行 | 结果 |
+|------|------|
+| 探针①仅 API 层失败（P1-1 核心） | api_log 落盘；汇总显示「screenshot (跳过: no page fixture)」✓ |
+| 探针②setup 失败 | trace + netlog + api_log ✓ |
+| 探针③UI call 失败 | 截图 + trace + netlog + api_log 四件套 ✓ |
+| 回归抓到 skip 误记 → 修复 | 修复后下一次全量 18 passed + 1 xfailed，无「M7 失败留痕」段（公网） |
+| 回归抓到 xfail canary 误记 → 修复 | 修复后本地全量 18 passed + 1 xfailed，无留痕段 ✓ |
+| 本地全量终验 | **18 passed + 1 xfailed in 22.48s**（reports 仅 .gitkeep，零留痕） ✓ |
+| 本地 -m api（R-03 新字段回归） | 9 passed |
+| 探针 API 失败 api_log JSON | 每条含 ts + nodeid（GET 200 / POST 302 实测）✓ |
+| conftest 条件化 setdefault | 本机 import 后 PLAYWRIGHT_BROWSERS_PATH=项目内路径 ✓ |
+| flake_measure.sh 语法 | git bash `-n` exit=0 ✓ |
+
+### 当前状态
+
+**M7：NEEDS_FIX → Builder 整改完成，等待独立复审**。**M9：NEEDS_FIX → 同上**。
+M8 关闭须排在 M7 之后。M10（Dockerfile 等 WIP）在 M7/M8/M9 未 APPROVED 前**不提交**
+（P1-C 要求）。待办：M9 真实 Actions 触发 UNVERIFIED（M11 上仓闭环）。

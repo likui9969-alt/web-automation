@@ -143,15 +143,56 @@ CI 固定跑**公网 Demo**（项目默认目标，见上），DB 用例按环�
    ReadTimeout 低频且重跑即过；若频率上升（flake 记录连续 > 20%），再引入
    urllib3 Retry 并记录在 MODULE_FEEDBACK
 
-### flake 度量命令（P2-2「有可复跑命令」）
+**DB 层在 CI 中的覆盖范围（M9 Review P2-1 显式声明）**：
+CI workflow 按分层只跑 `-m api` / `-m ui` / `-m e2e`，**不跑 `-m db`**——因此
+DB 校验（2 条持久化用例 + 1 条 xfail strict 负对照 canary）**在 CI 中零覆盖**
+（本地环境单独跑，见上文「本地 Docker 环境」节）。后果与补齐条件：
+- 后果：M6 的"数据真落库/真删"承诺没有 CI 级回归防护；canary 的报警价值
+  （断言失效时 xpass → 套件红）在 CI 里不会触发
+- 补齐条件：CI runner 引入 MySQL service container（或复用 M10 测试镜像）后再
+  加 `-m db` 步；在此之前 DB 层的回归防护由「本地全量 + M6 已闭环记录」承担
+
+### flake 度量命令（P2-2「有可复跑命令」，M9 Review P2-2 起双平台）
 
 ```powershell
-# 同命令 ×N，测公网失败率；结果贴到 MODULE_FEEDBACK「flake 记录」节
+# Windows：同命令 ×N，测公网失败率；结果贴到 MODULE_FEEDBACK「flake 记录」节
 .\scripts\flake_measure.ps1 -Runs 3 -Marker ui
+# Linux/macOS/CI（与 ps1 等价，输出口径一致；M9 Review P2-2 补齐）
+bash scripts/flake_measure.sh -r 3 -m ui
 ```
 
 任何一次 goto 重试触发都会在 pytest_terminal_summary 输出（M7 P2-1 闭环），
 flake 记录须含该计数，区分"flaky 消失"与"被重试救回"。
+
+### 容器内跑测试（M10：测试执行环境 Docker 化）
+
+同一套测试代码可在容器内运行（与 M6 的被测系统部署是两回事——这里容器化的是
+**测试环境**：Python + Playwright + Chromium 固化为镜像）：
+
+```powershell
+# 1. 起被测系统（M6）
+docker compose -f docker/docker-compose.yml up -d
+# 2. 容器内跑全套（构建测试镜像首次较久，chromium 下载）
+docker compose -f docker/docker-compose.yml run --rm test
+# 3. 分层跑
+docker compose -f docker/docker-compose.yml run --rm test -m api
+docker compose -f docker/docker-compose.yml run --rm test -m ui
+```
+
+要点（M10 面试）：
+
+- 测试容器与 app/db 同属 compose 网络：`BASE_URL=http://ohrm-app`（compose 服务名
+  直连，无需端口映射）、DB 直连 `ohrm-db:3306`（宿主 13306 仅是给人/工具用的映射）
+- db 门控把 `ohrm-app` 也识别为本地（conftest），容器内 DB 全套照跑
+- 非 root 用户运行：chromium 容器内免 `--no-sandbox`，且更安全
+- 留痕/报告经 volume 落宿主 `reports/`，容器跑完宿主直接看截图/Trace/Allure
+
+为什么不能一开始就用 Docker（面试回答）：
+
+- M1 起先本地跑通再容器化——先痛后治：容器化有真实成本（镜像体积、构建时间、
+  网络依赖、调试链路加长）
+- 只有"环境不一致"成为真痛点（换机器、CI、交付演示）才值得引入，这也是 M10
+  才做它的原因
 
 ## 被测系统硬约束（项目设计依据）
 

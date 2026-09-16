@@ -24,6 +24,12 @@ on:
   push:
   pull_request:
 
+# 同分支连推时取消进行中的旧运行（M9 Review P3-3）：避免并发跑满 runner、
+# 产物互相覆盖；新 push 代表最新代码，旧运行的结果无保留价值。
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -41,19 +47,27 @@ jobs:
 
       - name: 安装 Chromium（含系统依赖）
         run: |
-          # 关键：显式声明浏览器路径（linux 缓存目录），否则 conftest 的
-          # setdefault 会把 PLAYWRIGHT_BROWSERS_PATH 指到项目 .playwright-browsers
-          # （本机约定），CI 里该目录不存在 → UI/e2e 找不到浏览器全 error（M4 教训反向）
-          echo "PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright" >> "$GITHUB_ENV"
+          # 浏览器路径策略（M9 P0 修复：与 conftest.py setdefault 条件化配套）：
+          #   - conftest 仅当项目内 .playwright-browsers 存在时才 setdefault → 本机走项目内；
+          #   - CI runner 上该目录不存在 → 不设置 → 走 Playwright 默认路径，
+          #     即 Linux 的 $HOME/.cache/ms-playwright（= playwright install 落点）。
+          #   - 此处显式写 $HOME（bash 双引号内会展开；比 ~ 可靠，~ 是字面量）
+          #     与 install 落点保证一致，是"文件级 + 代码级"双保险。
+          echo "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" >> "$GITHUB_ENV"
           python -m playwright install --with-deps chromium
 
+      # 分层执行（M9 设计）：API 快先反馈；任一层红 → pipeline 红。
+      # if: always() 保证 API 红也在本轮拿到 UI/e2e 结果（Review P2-3）：
+      # 公网 flake 不该吃掉后续层的覆盖信息，最终判红仍由各层退出码保证。
       - name: API 层（快，先反馈）
         run: python -m pytest -m api
 
       - name: UI 层
+        if: always()
         run: python -m pytest -m ui
 
       - name: e2e 层
+        if: always()
         run: python -m pytest -m e2e
 
       - name: 上传 Allure 结果（M8）

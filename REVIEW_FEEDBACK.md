@@ -975,3 +975,478 @@ P1 未清零 ⇒ **禁止进入 M7**。
 
 - M6：**NEEDS_FIX**（P1-1/P2-1/P2-2 修复完成；P1-2 度量进行中；P1-3 流程已整改；等待独立复审）
 - 本响应节旨在提供修复事实与证据，**不构成复审结论** —— 按 AGENTS §13.1，最终判定须由独立审查出具
+
+---
+---
+
+# M6 独立复审（第二轮 · 修复验证）2026-09-16
+
+> 本节按 AGENTS §13.1 出具：由**未参与 M6 实现的独立审查**产出，附审查方自有运行数据，不采信任何自评数字作为结论依据。
+> 审查对象：提交 `8a9ab35`（整改）相对 `12f1059`（原始 M6）的变更。
+
+## 1. 审查范围
+
+- 变更文件：`tests/db/test_pim_db.py`、`tests/api/test_pim_employees.py`、`api/pim.py`、`pages/login_page.py`、`pages/pim_page.py`、`data/credentials.py`、`tests/e2e/test_pim_hybrid.py`、`conftest.py`、`config/settings.py`、`docker/docker-compose.yml`、`docker/.env.example`、`docker/cli_install_config.yaml`、`.gitignore`、`README.md`、`AGENTS.md`(§13.1)、`REVIEW_FEEDBACK.md`(追加)
+- 独立执行：**8 组实跑**（本地/公网双环境 + 门控验收三场景 + 运行时插桩探针）
+- 完整性核验：`git diff --numstat 12f1059 8a9ab35 -- REVIEW_FEEDBACK.md` → **+278 / −0**（复审原文零删改 ✓）；`git status` 干净
+- 未做：`docker compose down -v` 破坏性重建（见 P3-1）
+
+## 2. 总体评分
+
+**88 / 100**（上一轮 71 → 本轮 88；三个 P1 全部实证闭环，整改质量高于要求）
+
+## 3. 独立复跑与核验证据（全部为审查方自有数据）
+
+| # | 场景 | 结果 |
+|---|------|------|
+| 1 | 本地全量（项目 venv + 本地环境变量） | **18 passed in 18.41s**（api 9 + ui 5 + e2e 2 + db 2） |
+| 2 | 公网全量（默认环境，即 README 默认目标） | **16 passed, 2 skipped in 87.90s**（db 正确 skip） |
+| 3 | 公网 `-m ui` ×2 | 5 passed 49.15s / 5 passed 37.24s |
+| 4 | 公网 `-m db` 好凭证 | **2 skipped in 0.26s** |
+| 5 | 公网 `-m db` + 坏凭证（**P1-1 验收**） | **2 skipped in 0.22s**（修复前实测为 2 errors in 3.61s） |
+| 6 | 本地 `-m db` | 2 passed in 1.11s |
+| 7 | DB 直连核验 | 171 表 / `hs_hr_employee` 1 行 / `emp_number>1` = 0 / `ohrm_ro` INSERT 被拒 **1142** |
+| 8 | 运行时插桩探针（审查方自建，不改项目代码） | 公网全量：`Page.goto` 实际调用 **7 = 基线 7（零重试）**；公网 ui ×2：**5 = 基线 5（零重试）**；黑洞地址对照：LoginPage **8 次/4 用例**、PimPage **2 次/1 用例**（重试路径真实执行，且调用翻倍） |
+
+## 4. 上一轮问题闭环核验（逐项）
+
+| 编号 | 上一轮问题 | 闭环证据（审查方核实） | 判定 |
+|---|---|---|---|
+| **P1-1** | DB 门控求值顺序 → 非本地环境假红 | 用例签名改 `(db_client, pim_api)`；**我实测**：公网坏凭证 `2 skipped 0.22s`（修复前 2 errors）、好凭证 `0.26s`（修复前 4.18s，含一次真实公网登录） | ✅ **闭环** |
+| **P1-2** | 公网导航层 flake 未治理 + 无度量 | 度量→治理→再度量路径完整；治理为 goto 单次重试（窄捕获 `TimeoutError`；我实测其 MRO 为 `TimeoutError→Error→Exception`，与 Python 内建 `TimeoutError` 不同族，**不存在捕获失效的死代码**）；**我实测公网 3 次运行全绿且零重试** | ✅ **闭环**（残留可观测性问题降级为 P2-1） |
+| **P1-3** | 门禁自证（结论由实现方代笔、同提交） | AGENTS 新增 §13.1（独立提交 / 晚于被审实现 / 附审查方自有数据 / 审查方不得改被审代码 / **代笔则 APPROVED 作废**）；M6 → `NEEDS_FIX`，原 APPROVED 声明作废；所有者确认代笔事实；**最终 APPROVED 现由本次独立审查出具** | ✅ **闭环** |
+| P2-1 | 删除用例无失败安全清理 | `finally` 兜底 + 容忍 200/404 幂等（test_pim_db.py:90-93） | ✅ 已修 |
+| P2-2 | `employee_id` 论据错误 | docstring 改为「硬删 vs 软删才是 DB 层真实价值」，并显式写明 `employeeId` 属 API 响应可见事实 | ✅ 已修 |
+| P2-3 | 部署文档矛盾 + 重建未验证 | yaml 注释改实测入口；README 补 `down -v` + DROP 步骤；环境已重建（我实测 171 表 / 1 行 / 权限生效） | ✅ 已修（措辞细节见 P3-1） |
+| P2-4 | API 负向未落地 + 无 flake 度量 | 新增 API-06/07/08/09（大小写/空格/422/404）；**API-04 改为自造数断言**（连带闭合上一轮"隐式环境数据依赖"）；度量为一次性记录（机制化见 P2-2） | ✅ 主体已修 |
+| P2-5 | 端口绑全接口 + 明文口令入库 | 端口改 `127.0.0.1:13306` / `127.0.0.1:8080`；口令变量化 + 新增 `docker/.env.example` | ✅ 已修 |
+| P3-1 | reports/.gitkeep 失效 | `.gitignore` 改 `reports/*` + `!reports/.gitkeep`；**我实测** `git check-ignore` 不再命中，`git ls-files` 含该文件 | ✅ 已修 |
+| P3-2 | chromedriver.exe 残留 | 已删除（工作区确认） | ✅ 已修 |
+| P3-4 | E2E-01 teardown 不校验 | 已补清理结果校验 | ✅ 已修 |
+| P3-5 | README marker 描述过时 | 目录节已补 e2e/db | ✅ 已修 |
+| P3-6 | 量化口径不严谨 | README 已删「11 倍」，改写为「约 4~9 倍…视用例集与时段」+「本地确定性 5/5」 | ✅ 已修 |
+| P3-3 | HEADLESS 解析 | 仅注释不改代码（附理由：M2 Review 原判"文档注明即可"） | 接受，关闭 |
+| P3-7 | DB 未覆盖 UI 路径 | 登记为 M7+ 事项 | 记录，不阻塞 |
+| P3-8 | 负对照证明 DB 层会红 | 一次性探针，**已删除 → 无法复核（UNVERIFIED）**；断言非空转可由我此前的 API/DB 双向对照佐证（库中 lastName = 提交的唯一值，任何错误期望必然不匹配） | 见 P3-2 |
+
+## 5. 正确项
+
+1. **修复选对了层，而不是选省事的层**：P1-1 没有用"给 api_client 加 try/except"糊过去，而是把门控改到 fixture 求值顺序上——**非本地环境现在不产生任何网络调用**（0.22s 完成 skip，修复前 4.18s）。治因不治症。
+2. **P1-2 走完整闭环**：度量（治理前 2/3）→ 定位到 setup 层 goto → 治理 → 再度量（3/3），且**诚实记录了治理后仍出现的另一类失败**（Demo 全量 2 failed / requests ReadTimeout），未藏新问题。
+3. **重试边界写对了**：只捕 `TimeoutError`、只到第二次、不改断言、注释注明"区别于 M3 的阈值校准"。我实测确认异常类型匹配正确、重试确实执行、非 TimeoutError（如连接拒绝）不会被吞。
+4. **API-04 顺手闭合了上一轮未列为本轮重点的"隐式环境数据依赖"**（自造数 + 按主键过滤自己那条，不再依赖 `data[0]` 与"环境里恰好有人"）——主动扩大整改面。
+5. **API-08 断言到 `invalidParamKeys`**：不止断言 422 文案，还断言服务端指出的被拒参数名，业务价值高于状态码断言。
+6. **文档与代码同步修正**（README 口径、yaml 入口、AGENTS 新规），且**复审原文零删改**（diff +278/−0）——对审查独立性最实在的尊重。
+7. **环境重建后自证清白**：171 表 / 1 行 / 残留 0 / 只读权限仍生效，我独立复现一致。
+
+## 6. P0 — 阻塞问题
+
+**无。** 未发现虚构结果；上一轮 `P1-3` 的"是否升 P0"依所有者裁定不升级，本轮不再重开（结构事实已整改）。
+
+## 7. P1 — 重要问题
+
+**无。** 三个 P1 均已实证闭环（见 §4）。
+
+> 说明：P1-2 降级为 P2-1 **是基于证据，不是基于鼓励**——本轮 3 次公网运行全绿且插桩确认零重试，已无"稳定性严重不足"的可复现证据；剩余问题转为"度量结论不可验证"，属一般问题。
+
+## 8. P2 — 一般问题（必须在 M9 之前闭环）
+
+### P2-1：goto 重试不可观测——"3/3 通过"无法区分"flaky 消失"与"flaky 被吸收"
+- **证据**：`pages/login_page.py:35-43`、`pages/pim_page.py:32-41` 的 `except TimeoutError` 分支内**无日志、无计数、无 marker、无 attachment**。审查方插桩实测：重试一旦触发，`Page.goto` 调用次数**翻倍**（黑洞对照：LoginPage 8 次/4 用例、PimPage 2 次/1 用例），而项目自身任何输出都不反映这一事实
+- **影响**：① 治理后"Demo ui 3/3"这一结论**不可验证**——无法排除"3 次都靠重试救回"；② 重试把单次 `open` 最坏等待从 20s 抬到 **40s（2×）**，属隐含预算变化，注释未写明；③ 与我上一轮"先度量再治理"的要求存在闭环缺口：度量指标会被治理手段污染
+- **修复建议**：为重试加计数并在会话结束输出（最小实现即本次审查所用 `pytest_terminal_summary` 插件，约 10 行）；或并入 M7 留痕体系（attachment/日志）。同时把"重试上限 2 次 = 最坏 2×DEFAULT_TIMEOUT"写入 `config/settings.py` 注释
+- **闭环点**：**M7**（与"失败定位留痕"主题天然重合，建议并入 M7 交付物）
+
+### P2-2：度量尚未机制化，且治理只覆盖 goto 层
+- **证据**：flake 数据仍是 MODULE_FEEDBACK 里的手写记录（"2/3 → 3/3"），没有可复跑命令与固定记录格式；**治理只覆盖 goto**——Builder 记录的 Demo 全量 `2 failed` 属 `requests` 层 ReadTimeout（20s），该层无任何策略
+- **影响**：① 换人/换时段无法回答"当前 flake 率是多少"，而这正是我上一轮的核心诉求；② M9 CI 若以默认环境（公网 Demo）为目标，requests 层瞬态会直接打红流水线，届时"代码回归 vs 网络瞬态"仍靠人工重跑判断
+- **修复建议**：① 固化度量命令 + 结果记录模板，重试计数一并纳入；② **明确 CI 的目标环境策略**（建议 CI 固定本地 Docker，或对公网瞬态给出显式声明与策略），不要让"M9 跑默认公网"成为默认
+- **闭环点**：**M9 准入前**（硬性）
+
+### P2-3：两条 API 用例仍存在共享环境竞态与清理不校验
+- **证据**：`test_employees_pagination_limit` 两次调用 `list_employees` 比较 `meta.total`（毫秒窗口内他人造数会造成偶发不等）；`test_employees_list_structure` 的 `finally: pim.delete_employee(emp_number)` 未校验结果，而同批 DB 用例已改为校验——同仓两套标准
+- **影响**：偶发假红 + 清理失败静默。本地环境为零，M9 若在公网环境跑会放大
+- **修复建议**：分页用例改为不受他人写入影响的语义断言（如对自造数据断言），或断言 `total >= 返回条数`；两个清理点统一加状态码校验
+
+## 9. P3 — 优化建议
+
+1. **README 重建节措辞与事实有细微出入**：实际触发重建的是 Docker Desktop 重启导致数据卷被重新初始化（Builder 自述"无需 down -v"），而 README 标题写作「从零重建（…实测留痕）」并列出 `down -v` 步骤。`down -v` 之后的等效状态被验证了，但该命令本身未执行。建议注明"等效路径已验证"，或按 README 显式跑一次
+2. **P3-8 负对照以"用后即删的探针"完成 → 无法复核（UNVERIFIED）**。建议固化为常规用例或脚本，否则下轮审查者无法验证"用例真的会红"
+3. `test_api_created_employee_persisted_in_db` 的清理不校验状态码（与 P2-3 同一处）
+4. `data/credentials.py` 新增 `WRONG_PASSWORD` 很好；可把用户名大小写/空格两组入参也一并外置，保持"数据在 data/"的一致口径
+5. `docker/.env.example` 提醒"需与 cli_install_config.yaml 口令保持一致"——建议把一致性检查做成 README 自查命令，避免改一处漏一处
+
+## 10. 测试设计审查
+
+| 维度 | 上一轮 | 本轮 | 依据 |
+|------|--------|------|------|
+| 正常/异常/边界/权限/状态 | ⚠️ 缺负向 | ✅ 明显改善 | API 层 5 → 9 条，补齐大小写、空格、422、404；权限（401 / 只读被拒）、状态（purged_at）齐备 |
+| 环境数据依赖 | ❌ 隐式依赖 `total>0`、`data[0]` | ✅ 已消除 | API-04 自造数 + 按主键过滤；公网他人数据波动下我实测稳定通过 |
+| 清理失败安全 | ❌ 一条用例缺失 | ⚠️ 主体已修 | DB 删除用例补 `finally`；API-04 清理仍不校验（P2-3） |
+| 环境门控 | ❌ 假红 | ✅ 已修 | 三场景实测：公网好/坏凭证均 0.2s 内 skip；本地正常执行 |
+| 负对照（用例会红） | 未做 | ⚠️ 一次性探针 | 无法复核（P3-2） |
+| 分层是否正确 | ✅ | ✅ | DB 层仍是"验证增强"未膨胀为平行层；API 负向未误放 UI 层 |
+| 是否过度测试 | ✅ 无 | ✅ 无 | 18 条覆盖 4 层，e2e 仍 2 条，未为凑数加 UI |
+
+## 11. 工程化审查
+
+- **Fixture**：✅ `(db_client, pim_api)` 顺序修复是**用语言机制解决问题**的正解；门控验收标准明确且可复跑
+- **重试封装**：⚠️ 两处 `open()` 各写一份 try/except（LoginPage / PimPage）——逻辑重复且不可观测。建议抽成 `utils/` 或 BasePage 方法，一处实现计数与日志（DRY + 观测性同时解决）
+- **API 封装**：✅ `list_employees_by_last_name` 作为"参数契约回归锚点"理由明确（注释写明：后端若开始接受该参数，用例失败会提醒认知更新），非为测试而测试；URL 仍走 `self.client.base_url`
+- **数据分离**：✅ 硬编码 `"wrongpass123"` 已外置为 `WRONG_PASSWORD`
+- **配置分离**：✅ compose 口令变量化 + `.env.example`；DB 配置与 `ASSERT_TIMEOUT_MS` 均在 settings.py 单一取值处
+- **安全**：✅ 端口收回 loopback、口令可覆盖、`.env` 已 gitignore、只读账号 DB 侧强制（我实测 1142）
+- **版本控制**：✅ 整改独立提交（`8a9ab35`，晚于被审实现），提交信息如实标注"M6 回 NEEDS_FIX 待独立复审"；`REVIEW_FEEDBACK.md` 只增不删
+- **文档一致性**：✅ README / yaml / AGENTS / MODULE_FEEDBACK 四处已对齐（P3-1 一处措辞待微调）
+
+## 12. 稳定性审查
+
+- **本地**：✅ 18 passed 18.41s，零残留（`emp_number>1 = 0`），确定性达标
+- **公网**：✅ 本轮 3 次运行全绿（全量 16P+2S 87.90s、ui 5P ×2），插桩确认 **goto 重试零触发** → 此前导航层 flake 当前不可复现
+- **失败阶段覆盖**：⚠️ 已知三类来源——断言层（已收敛 20s）、导航层（已重试）、**requests 层（无策略）**；第三类仅见于 Builder 记录，本轮我未复现 → **UNVERIFIED（频次未知）**
+- **重试合规性**：✅ 窄捕获 + 上限 2 次 + 注释留痕，符合 AGENTS §14"吸收环境噪声、不改变断言与结论"；⚠️ 不可观测使"是否仍依赖重试"无法判断（P2-1）
+- **隐含预算**：⚠️ 重试使 `open` 最坏等待 20s → 40s，建议显式记录（P2-1）
+- **数据污染**：✅ 双环境残留均为 0；只读权限在环境重建后仍生效
+- **环境可重建性**：✅ 重建后状态与初次一致（171 表 / 1 行 / 权限正常），我实测确认
+
+## 13. 面试能力审查
+
+| 能力项 | 判断 | 依据 |
+|--------|------|------|
+| 为什么要 DB 校验层 | ✅ **本轮已救回** | 论据换成"硬删 vs 软删"（API 会过滤软删行 → API 视角无法区分），这才是查库独有的信息；被问倒的那条已自纠 |
+| flaky 治理怎么讲 | ✅ **本项目最强素材** | 现有完整闭环故事：度量（2/3 红，全在 setup）→ 分层定位（断言层 vs 导航层）→ 窄捕获重试 → 再度量（3/3），并**主动交代治理后仍出现的 requests 层瞬态**。建议连同"重试会掩盖信号、所以必须计数"一起讲 |
+| 门禁/独立性怎么讲 | ✅ 罕见加分项 | `AGENTS §13.1` + "代笔则 APPROVED 作废、状态回退"是真实发生并落地为制度的事故处理，比背"团队规范"可信得多 |
+| 环境门控怎么设计 | ✅ 可以讲了 | 用语言机制（fixture 求值顺序）而非 try/except 兜底，且能给出"0.22s 完成 skip、零网络调用"的量化验收 |
+| 环境变量切换零代码分叉 | ✅ 强 | 同一套 18 条用例：本地 18 passed / 公网 16 passed + 2 skipped，两端我都实测过 |
+| 数据真实性 | ✅ 强 | 我抽查的每条声明均可复现；README 主动下调倍数口径。**这是本项目最该保持的品质** |
+| 待补 | ⚠️ | Playwright vs Selenium 选型理由（M1 起欠账）；`down -v` 完整实测 |
+
+## 14. 必须修改的问题
+
+P1 已清零，**无阻塞项**。以下为 M7/M9 准入条件：
+
+1. **P2-1**（重试可观测性 + 最坏预算注释）→ 闭环点 **M7**
+2. **P2-2**（度量机制化 + **CI 目标环境策略**）→ 闭环点 **M9 准入前**（硬性）
+3. **P2-3**（分页竞态 + 清理校验一致性）→ 闭环点 **M9 准入前**
+
+## 15. 建议修改的问题
+
+1. P3-1 README 重建节措辞对齐事实
+2. P3-2 把"负对照"固化为常驻自检项
+3. P3-4 两处 `open()` 重试逻辑抽成一处（DRY + 观测性一次解决）
+4. P3-5 一致性自查命令化（`.env` ↔ `cli_install_config.yaml` 口令）
+5. 补 Playwright 选型理由（M1 起欠账，M11 面试材料必须项）
+
+## 16. 最终结论
+
+### 当前状态
+
+**APPROVED_WITH_FIXES**
+
+| 条件（AGENTS §9） | 结果 |
+|---|---|
+| P0 = 0 | ✅ 达成 |
+| 核心 P1 已解决 | ✅ **达成（P1-1 / P1-2 / P1-3 均经审查方实测闭环）** |
+| 测试真实运行 | ✅ 达成（8 组独立执行，含门控验收与运行时插桩） |
+| 测试设计合理 | ✅ 达成（API 负向补齐、环境数据依赖消除） |
+| 数据设计基本稳定 | ✅ 达成（双环境残留 0、只读权限 DB 侧强制） |
+| Builder 能解释核心设计 | ✅ 达成（论据自纠、量化口径主动下调、flaky 治理闭环可复述） |
+
+### 判定说明
+
+- P1 清零 ⇒ **M6 关闭，M7 允许开工**。
+- 为什么是 `APPROVED_WITH_FIXES` 而非 `APPROVED`：项目有**"P2/P3 被无限期顺延 → 后来升级为 P1"**的既有历史（5s 断言预算曾长期挂在 P3，最终以 P1 形式打红一次构建）。本次对 P2-1/P2-2/P2-3 设定硬性闭环点，是不让同一模式重演。
+- 按 AGENTS §13.1，本次 APPROVED 由未参与实现的独立审查出具，附审查方自有运行数据（§3），与 Builder 自评数据无同源。
+
+### 一句话总结
+
+**上一轮我判 M6「代码比结论更可信」；这一轮整改把结论追上了代码** —— P1-1 用 fixture 求值顺序治因而非兜底，P1-3 把一次门禁事故写成了制度（§13.1），P2-2 主动认领了自己的错误论据。唯一还没追上的地方是**"重试让报告变绿，但报告不告诉你重试过"**——这正是 M7 该解决的问题。
+
+---
+---
+
+# 全项目 P1 闭环总账（审计索引，2026-09-16）
+
+> 用途：跨模块审计索引——**不重复各节结论，只回答"还有没有未闭环的 P1"**。
+> 维护约定：每轮 Review 结束时更新；仅列 P0/P1 与"有硬性闭环点的 P2"，P3 见各节。
+
+## 1. 当前门禁状态
+
+| 项 | 状态 |
+|---|---|
+| M0–M5 | APPROVED（M0 按 M0-lite 收口） |
+| M6 | **APPROVED_WITH_FIXES**（第二轮独立复审，见上文；P1 全清零） |
+| M7 | 允许开工 |
+| 未闭环 P0 | **0** |
+| 未闭环 P1 | **0** |
+
+## 2. P1 总账（逐条可追溯）
+
+| # | 来源节 | P1 内容 | 闭环证据（审查方实测） | 状态 |
+|---|--------|---------|------------------------|------|
+| 1 | M1 审查 | 版本控制缺失（git 未装、仓库未初始化） | `git 2.55.0.windows.3`；仓库 9 次提交，首次 `c93f61e`；跟踪 27 文件；`.venv`/`.playwright-browsers`/`chromedriver.exe` 均未入库 | ✅ 闭环 |
+| 2 | 全面复审（M0–M5） | M0 未 APPROVED 却放行 M1–M5（门禁失效） | PLAN.md §3 重写为 M0-lite 收口记录；§6 改为"MODULE_FEEDBACK 单一事实源"；M0 状态 APPROVED | ✅ 闭环 |
+| 3 | 全面复审（M0–M5） | 断言层预算 5s 与操作层 20s 不一致（已复现失败） | `ASSERT_TIMEOUT_MS` 收敛为单一取值处，全仓 5 个断言点替换且无裸 `expect` 残留；审查方复跑公网 `-m ui` 2/2（64.76s / 61.14s） | ✅ 闭环 |
+| 4 | M6 复审第一轮 | DB 门控求值顺序 → 非本地环境产出 ERROR 假红 | 用例签名改 `(db_client, pim_api)`；审查方实测公网+**坏凭证** `2 skipped in 0.22s`（修复前 2 errors in 3.61s）；本地 2 passed 1.11s | ✅ 闭环 |
+| 5 | M6 复审第一轮 | 公网导航层 flake 未治理 + 无度量 | goto 单次重试（窄捕获 `TimeoutError`，MRO 已核非内建同名类）+ 治理前后度量；审查方公网 3 次运行全绿且插桩确认**零重试** | ✅ 闭环 |
+| 6 | M6 复审第一轮 | 门禁自证（审查结论由实现方代笔、与实现同提交、闭证数据与自评同源） | AGENTS 新增 §13.1（独立提交/晚于被审实现/附审查方自有数据/**代笔则 APPROVED 作废**）；M6 回 `NEEDS_FIX`，原 APPROVED 作废；本轮 APPROVED 由独立审查出具 | ✅ 闭环 |
+
+## 3. 有硬性闭环点的 P2（不阻塞 M7，阻塞 M9）
+
+| # | 来源节 | 内容 | 闭环点 |
+|---|--------|------|--------|
+| P2-1 | M6 复审第二轮 | goto 重试不可观测（无计数/日志）→ "3/3 通过"无法区分 flaky 消失 vs 被吸收；重试隐含把最坏等待抬到 2×20s | **M7** |
+| P2-2 | M6 复审第二轮 | flake 度量未机制化；**治理只覆盖 goto，`requests` 层无策略** → 需明确 CI 目标环境策略 | **M9 准入前（硬性）** |
+| P2-3 | M6 复审第二轮 | `test_employees_pagination_limit` 双 total 竞态；`test_employees_list_structure` 清理不校验状态码 | **M9 准入前** |
+
+## 4. 审计时发现的口径出入（登记，不影响结论）
+
+| 项 | 声称 | 实测 | 处理 |
+|---|------|------|------|
+| M1 首次提交条目数 | MODULE_FEEDBACK M1 记录"按名 add **15** 项" | 实际 `c93f61e` 含 **19** 个条目 | 无遗漏、无多余产物入库；建议 Builder 更正为 19 |
+
+## 5. 维护提示
+
+- 本索引**只增不删**（与 AGENTS §14 一致）；每条 P1 追加时须附**审查方实测证据**，不得引用 Builder 自评数据作为闭环依据（§13.1）。
+- 若某条被判定为误报或撤销，不删除该行，改为在状态列标注「撤销（原因）」。
+
+---
+---
+
+# M7–M9 独立复审（2026-09-16）
+
+> 本轮三个模块（M7 失败定位 / M8 Allure / M9 CI）同为 `WAITING_FOR_REVIEW`，一次提交（audit）。
+> 审查方法：因工作区含未提交 WIP 且被并发修改，**M7 的验证改用 `git archive` 只读快照**（等效于该提交的全新检出），避免把 M8/M10 的改动算进 M7 的结果。
+
+## 0. 先说一个让本轮审查必须换方法的事实（跨三个模块的 P1）
+
+审 M7 时工作区同时存在：未提交的 M8 改动（allure 集成、pytest.ini `--alluredir`、requirements、各测试文件）+ 未跟踪的 `tests/ui/test_m8_probe.py`（**故意失败的探针**）。
+在该状态下直接跑套件实测：**`test_m8_probe.py F`，退出码 1 —— 套件恒红**。
+随后 M8、M9 相继提交，工作区又出现 M10（`Dockerfile`、`.dockerignore`）。
+
+| 项 | 事实 |
+|---|---|
+| 门禁顺序 | M8 在 M7 未 APPROVED 时开工；M9 在 M8 未 APPROVED 时开工；M10 在 M7/M8/M9 全未 APPROVED 时已进工作区 —— **累计第 3、4 次**（前两次：M0 未关闭推 M1–M5；M6 与全面复审同会话开工） |
+| 可审性 | 交付态 ≠ 提交态，审查者拿到的工作区**不能复现 M7 的结果**；本轮被迫用只读快照 |
+| 交付污染 | 故意失败的探针留在 `tests/` 且被 marker 收集 → 任何 `pytest` 调用都是红的；探针自身 docstring 写明"用后即删"却未删（M8 提交时是否删除需 Builder 确认） |
+
+**P1-C（跨模块）**：审查窗口内工作区必须与提交态一致；临时探针类文件不得留在被收集的目录（应放 `tests/_probes/` 并加 `--ignore`，或提交前删）。`tests/api` / `tests/ui` 目前没有 `__init__.py` 也无 `collect_ignore`，任何新文件都会被收集。
+
+---
+
+# M7 审查：失败定位体系
+
+## 1. 审查范围
+
+- 提交：`1d63dc0`（M7）+ `cf40680`（M6 二轮优化，闭环我上一轮的 P2-1/P2-3/P3-1/P3-2/P3-5）
+- 文件：`utils/failure_artifacts.py`、`conftest.py`、`api/client.py`、`pages/base.py`、`tests/db/test_negative_control.py`、相关测试与 README
+- 独立执行：**6 组**（绿跑零产物 / UI 失败 / API 失败 / goto 失败 / CWD 异常 / 日志内容检查），均在只读快照内
+
+## 2. 独立复跑结果
+
+| 组 | 场景 | 结果 |
+|---|---|---|
+| R1 | 本地全量（绿） | **18 passed + 1 xfailed in 26.08s**；`reports/` **仅 `.gitkeep`** —— 成功零留痕 ✓ |
+| R2 | `-m api` + 坏凭证 | **2 failed + 4 errors**；`reports/` **仅 `.gitkeep`** —— **零留痕** ✗ |
+| R3 | `-m ui -k valid_credentials` + 坏凭证 | 截图 + Trace + netlog **三件套齐备**，终端汇总逐条列出路径 ✓ |
+| R4 | 黑洞 URL（goto 失败） | Trace + netlog 产出；**截图缺失且原因不可见** ✗ |
+| R5 | `-m "api or ui"` 坏凭证 | 印证 api_log 非按用例隔离（见 P2-2） |
+| R6 | CWD ≠ 项目根 | netlog 写入抛 `FileNotFoundError` → 结果变 **1 failed + 1 error**，汇总消失（见 P2-1） |
+
+## 3. 正确项
+
+1. **成功零留痕是真的**（R1）：不是"设计上应该如此"，而是绿跑后 `reports/` 一个字都没有 —— trace 在成功路径被 `stop()` 丢弃。
+2. **UI 失败留痕可用**（R3）：截图（full_page）、Trace（zip）、netlog 齐备，`pytest_terminal_summary` 把 nodeid→产物路径逐条打出来，**定位起点是现成的**。
+3. **setup 阶段失败也留痕**（R4）：`makereport` 收录 setup/call 双阶段失败，goto 挂了仍能拿到 trace+netlog，覆盖了我预期会漏的场景。
+4. **上轮 P2-1 闭环（重试可观测）**：`pages/base.py` 把重试收敛到 `goto_with_retry`，`RETRY_COUNT` 由终端汇总输出。R4 实测输出：`= goto 重试（AGENTS §14 环境噪声吸收）: http://10.255.255.1:8080/... retried x4 =` —— 计数真的有值、真的可见 ✓
+5. **上轮 P2-3 闭环**：分页用例改为语义断言（`total >= len(data)`），不再比两次调用的 total；API-04 与 e2e teardown 的清理都加了结果校验（`assert resp.ok`）。
+6. **上轮 P3-2 的解法比我的建议更好**：负对照固化为 `xfail(strict=True)` 常驻用例 —— 断言失效时它会 **xpass → 套件变红报警**，且用例内写明"禁止为恢复全绿而删除本用例"。
+7. **`API_LOG` 采用 requests hooks 注入，纯记录不拦截**，不影响断言行为；`api/client.py` 的 hook 通过 `self.` 取静态方法，签名与 requests 调用约定一致。
+
+## 4. P0
+
+**无**（未发现虚构结果；R1/R3 的声明均被我复现）。
+
+## 5. P1
+
+### P1-1：纯 API 层 / DB 层失败**零留痕** —— 与模块自述直接矛盾
+
+- **模块自述**（`failure_artifacts.py` 注释）："4. API 请求/响应日志 —— requests.Session hooks 全局记录（含 UI 会话复用）**（API 层失败无浏览器可截，请求日志是唯一现场）**"
+- **实测**（R2）：`-m api` + 坏凭证 → **2 failed + 4 errors**，`reports/` 只有 `.gitkeep`。没有截图（合理）、**没有 api_log（不合理）**、终端汇总什么都没有。
+- **根因**（`grep` 全仓证实调用链唯一）：`_dump_failure_artifacts` 只被 `_teardown_page_flow` 调用，而后者只在 `page` / `ui_auth_page` 两个浏览器 fixture 的 teardown 里执行。`tests/api/**`（9 条）与 `tests/db/**`（2 条 + canary）不使用浏览器 fixture → **dump 永不触发**。`API_LOG` 除了 `_dump_failure_artifacts` 内部，全仓无第二个使用点；`pytest_terminal_summary` 也只读 `m7_failure_paths`（仅 dump 会写）。
+- **为什么自己的验证没发现**：Builder 记录的三类"故意制造失败"（UI 断言失败 / goto 失败 / e2e 造数后失败）**全部使用 page fixture** —— 缺口在自己的取样范围内天然不可见。这与上一轮"门控只测顺利路径"是同一类取样偏差。
+- **影响**：① 项目 19 条用例里有 11 条（api 9 + db 2）失败时得不到任何现场，而 M7 的立身之本正是"失败时能否 5 分钟定位"；② 面试时若被问"API 层失败怎么定位"，答案目前是不成立的。
+- **修复建议**：把留痕从"fixture 触发"改为"**钩子触发**"——在 `pytest_runtest_makereport`（已有 nodeid 收集）或 `pytest_runtest_teardown` 里对**任何**失败用例统一收口：有 page 就截图，没 page 就跳；netlog/api_log 一律落盘（api_log 至少要有，这正是它的存在理由）。同时把"哪些用例类型会留痕"写进注释，避免再次出现"覆盖 2 层却宣称 4 类产物"。
+
+## 6. P2
+
+### P2-1：netlog 写入无兜底 + 产物目录相对/绝对不一致 → 会把"1 failed"放大成"1 failed + 1 error"，并吞掉汇总
+- **代码事实**：`conftest.pytest_configure` 用**相对**路径 `Path("reports")/sub` 建目录；`failure_artifacts.REPORTS_DIR` 是**绝对**路径（项目内）。截图与 trace 的写入都有 `try/except`，**netlog 的 `write_text` 没有**。
+- **实测**（R6，CWD 设为项目外、快照 reports 子目录清空）：`FileNotFoundError: ...\reports\logs\120145_..._net.json` → 报告从 `1 failed` 变成 **`1 failed + 1 error`**；且异常发生在 `m7_failure_paths.append(...)` **之前**，导致**已经写成功的截图与 Trace 也不出现在终端汇总里**。
+- **影响**：与模块声称的"留痕失败不能掩盖原始失败原因"完全相反 —— 它不但掩盖，还额外制造一个 error 并让已产出的产物变成不可发现状态。触发条件（CWD ≠ 项目根）在 IDE 运行器/CI/`pytest path/to/tests` 下都可能出现。
+- **修复**：`pytest_configure` 改用 `failure_artifacts.REPORTS_DIR`（同一常量）；netlog 写入包 `try/except`（与另两类一致）；`append` 提前到写文件之前，保证"有产物就一定汇总"。
+
+### P2-2：api_log 是全 session 扁平列表，**没有任何关联键**（无时间戳、无用例归属）
+- **实测**（R5）：纯浏览器用例 `test_login_valid_credentials` 的 `_api.json` 里出现的是 **api 层用例**发出的两条请求（`GET /auth/login` 200、`POST /auth/validate` 302）—— 该 UI 用例自身一次 HTTP API 调用都没发。
+- **影响**：19 条规模下，失败用例的 api_log 会混入整个 session 的 API 流量且无法过滤（记录里只有 method/url/status/ms，没有 `ts`、没有 nodeid）。作为"唯一现场"的产物，可用性被稀释到需要靠猜。
+- **修复**：`record_api_log` 增加 `ts`（毫秒时间戳）与当前用例 nodeid（可从 `pytest.current_test` 类钩子注入，或由 conftest 在用例开始时设置一个模块级 current nodeid）。改动约 5 行，收益是日志可过滤。
+
+### P2-3：goto 失败时截图**静默缺失**，原因不可见
+- **实测**（R4）：4 个用例全部只有 trace + netlog，**没有截图**，终端汇总也没有任何提示。
+- **根因（本机复现）**：导航失败后 `page.screenshot()` 自身会超时——报错 `Page.screenshot: Timeout 3000ms exceeded. Call log: taking page screenshot → waiting for fonts to load...`。于是走 `except` 分支把 `paths["screenshot"]` 置为 `None`。
+- **附带问题**：那条"截图失败（已跳过，不掩盖原失败）"的 `print` 在日志里 **grep 0 命中**（被 pytest 捕获且该阶段不展示），而终端汇总只列非 `None` 项 → 使用者看到的是"这个失败没有截图"，**不知道是为什么**。对定位体系来说，"为什么没有产物"本身就是要回答的问题。
+- **修复**：截图使用更短的独立超时（如 5s，避免在导航挂掉时白等一个完整默认超时）；汇总里显式打印缺失项与原因（例如 `screenshot -> (跳过: Page.screenshot timeout)`）。
+- **附带收益**：当前实现下，若站点整体不可达，每个失败用例都会在截图等待上再消耗一个完整 `DEFAULT_TIMEOUT`（20s），放大 CI 时间。
+
+## 7. P3
+
+1. netlog 只记 `method/url/status`（无耗时、无响应头、无 body），对"5 分钟定位"偏薄；body 在 Trace 里但要解压翻找，建议至少补 `elapsed` 与 `content-type`。
+2. `make_artifact_paths` 时间戳只到**秒**（`%H%M%S`），启用 `pytest-rerunfailures` 时同用例重跑会互相覆盖；建议加毫秒或序号。
+3. `make_artifact_paths` 不负责建目录（依赖 `pytest_configure` 先跑），函数不自洽；建议内聚建目录。
+4. `m7_failed_nodeids` 存在 `config` 上，`pytest-xdist` 多 worker 场景需 per-worker（当前无 xdist，记录即可）。
+5. 留痕产物无清理策略：`reports/` 会持续累积（实测多次运行后同用例多份产物并存），建议 M11 前加保留策略或在 `.gitignore` 说明中提示。
+
+## 8. 测试设计 / 工程化 / 稳定性 / 面试能力（M7）
+
+- **测试设计**：✓ 留痕机制本身不污染断言；✓ 成功零产物（不制造噪音）；✗ **覆盖矩阵不完整**（只覆盖浏览器层，见 P1-1）——建议按"4 个执行层 × 失败阶段(setup/call)"列矩阵逐格验证，而不是挑三类易过的场景。
+- **工程化**：✓ 统一入口 `failure_artifacts.py`、路径命名按 nodeid 唯一化、产物 gitignore；✗ 目录创建与产物路径用了两套路径来源（P2-1）；✗ 重试已抽到 `pages/base.py` 但留痕仍在 conftest 内以私有函数形式存在，边界尚可但已开始膨胀（conftest 已 260+ 行）。
+- **稳定性**：✓ 留痕不依赖网络（本地写文件）；✓ `try/except` 包裹截图与 trace 的方向正确；✗ netlog 例外（P2-1）。
+- **面试能力**：✓ "为什么失败要留四类产物"讲得清（截图看现象/Trace 看时序/netlog 看请求轨迹/API 日志看接口契约）；✓ 重试可观测化把"flaky 消失 vs 被救回"变成可答问题；⚠️ **"API 层失败怎么定位"目前会被问倒**（P1-1），这是 M7 最该先补的一格；⚠️ 建议把"我的验证取样偏向 page fixture 用例"这件事本身讲出来——这是很硬的自我审查案例。
+
+## 9. M7 结论
+
+**NEEDS_FIX**（1 个 P1：跨层留痕缺失；P2×3）。门禁：M7 不得关闭，M8/M9 的 APPROVED 也依赖 M7 的结论（M8 的 attachment 与 M9 的 failure-artifact 上传都建立在 M7 留痕之上）。
+
+---
+
+# M8 审查：Allure 报告
+
+## 1. 范围与证据
+
+- 提交：`a7fed00`
+- 实测：工作区 `reports/allure-results/` 内可见 `*-attachment.png` 与对应用例的 result json（attachment 落盘成立）；`reports/allure-report/`（HTML）已生成，`widgets/summary.json`、`data/behaviors.json` 齐备
+- **未复跑**：`allure generate` 未由我重新执行一次（工作区已有产物）；Allure CLI 版本 2.43.0 未核
+
+## 2. 正确项
+
+1. **排障结论正确且有价值**：`fixture teardown 时 Allure 上下文已关闭 → attach 被静默丢弃`，因此把截图移到 `pytest_runtest_makereport` 的 call 阶段并 `item._m7_page` 取 page。这是 Allure + pytest 集成里典型的坑，实测数据支撑（attachment 确实关联到了 failed 用例）。
+2. **四元素落地**：feature 按层归类（`pytestmark` 声明，天然不漏）、中文 title、severity 分级、attachment。
+3. **报告产物不入库**：`reports/` 已 gitignore，`allure-results` 与 HTML 都不会污染仓库。
+
+## 3. 问题
+
+- **P2（继承 M7 P1-1）**：截图搬进 `makereport` 后，**attachment 仍只对拥有 page fixture 的用例可用**（`item._m7_page`）。API/DB 层失败既无留痕也无附件 —— 报告里那 11 条用例失败时是"裸失败"。修 M7 P1-1 时一并解决。
+- **P2（跨模块 P1-C）**：M8 在 M7 未 APPROVED 时开工并提交；提交前工作区套件是红的（探针）。若 M8 提交时探针未删，则 `-m ui` 在 CI 里也会带上这条故意失败用例（见 M9）。
+- **P3**：`item._m7_page` 属于"在 item 上挂属性"的隐式耦合（page 由 `page`/`ui_auth_page` 两处分别挂），建议改为一个 artifact 收集器 fixture（`request.node.stash` 亦可），把"谁提供 page"这件事收口到一处。
+- **P3**：`conftest.py` 用 `import allure` 在函数内导入（延迟导入避免本地未装时报错）——方向可接受，但既然 `requirements.txt` 已声明 `allure-pytest`，且 `pytest.ini` 已 `--alluredir`，本地未装时所有用例都会因插件缺失失败，延迟导入的保护有限。记录即可。
+
+## 4. M8 结论
+
+**APPROVED_WITH_FIXES**（无独立 P0/P1；P2 中一条继承自 M7、需随 M7 一并修）。**但 M8 的关闭必须排在 M7 之后**（报告的价值取决于留痕是否覆盖全层）。
+
+---
+
+# M9 审查：GitHub Actions CI
+
+## 1. 范围与证据
+
+- 提交：`5374eda`
+- 文件：`.github/workflows/test.yml`、`scripts/flake_measure.ps1`、README「CI 与 flakes」节
+- 实测：本机复现 `~` 展开语义（bash 双引号 vs `$HOME`）+ Playwright 对 `~` 的处理；**真实 GitHub Actions 未触发（UNVERIFIED，Builder 亦如实登记）**
+
+## 2. 正确项
+
+1. **分层执行 + 失败可见**：api → ui → e2e 顺序执行，任一层红则 pipeline 红；`always()` 上传 allure-results、`failure()` 上传 M7 留痕 —— 上传策略与 AGENTS §14"不隐藏失败"一致。
+2. **上轮 P2-2 双闭环**：① CI 目标环境策略**显式声明**（固定公网 Demo、DB 门控 skip、requests 层不加代码重试的理由与触发条件）——这正是我上轮要求的"不要让默认环境成为默认"；② `scripts/flake_measure.ps1` 把度量机制化（同命令 ×N + 结果模板 + 重试计数），不再是手写记录。
+3. **诚实登记 UNVERIFIED**：主动写明 `act` 因本机 GitHub 网络不可达未跑通、真实 Actions 触发未验证。这是本轮最值得肯定的态度——把"我没验证的事"标出来，而不是含糊过去。
+4. **`cache: pip`、`timeout-minutes`、`--with-deps`** 等工程细节齐备。
+
+## 3. P0 — 浏览器路径写法必然导致 CI 的 UI/e2e 全 error
+
+- **代码**（`test.yml` 42–48 行）：
+  ```yaml
+  - name: 安装 Chromium（含系统依赖）
+    run: |
+      echo "PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright" >> "$GITHUB_ENV"
+      python -m playwright install --with-deps chromium
+  ```
+- **三条事实**：
+  1. **bash 双引号内 `~` 不展开**（本机实测：`echo "PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright"` 原样输出 `~`；写成 `$HOME` 才展开为 `/c/Users/.../.cache/ms-playwright`）→ 写入 `GITHUB_ENV` 的是**字面 `~`**
+  2. **Playwright 不展开 `~`**（本机实测：以 `PLAYWRIGHT_BROWSERS_PATH='~/.cache/ms-playwright'` 启动，报错路径为 `D:\fileprogram\测试\web-automation\~\.cache\ms-playwright\chromium_headless_shell-1234\...` —— `~` 被当成普通目录名，相对 CWD 解析）
+  3. `GITHUB_ENV` 的写入**对当前步不生效**（GitHub 行为，仅后续步可见）→ 安装步执行时该变量**未设置** → Chromium 装到 Playwright 默认位置（Linux 上即 `$HOME/.cache/ms-playwright`）
+- **推论**：后续 UI/e2e 步拿到的值是字面 `~/.cache/ms-playwright`，Playwright 会相对工作目录解析成 `/home/runner/work/<repo>/<repo>/~/.cache/ms-playwright` → **找不到浏览器 → UI 与 e2e 全部 error**。而且 conftest 的 `setdefault` 此时不会兜底（变量已被显式设置）。
+- **不确定性声明（必须明说）**：事实 1、2 我在本机实测；事实 3 依据 GitHub 文档行为，**我无法在本机验证**。因此本条的判定有两个分支：
+  - 若事实 3 成立（预期）→ **P0：CI 的 UI/e2e 无法执行**，M9 的 DoD（push 实际触发）不可能达成；
+  - 若 runner 端竟会展开 `~` → 该行只是冗余写法，降级为 P3。
+  **无论哪个分支成立，当前写法都该改**：它把一个"能否工作"押在 runner 的隐式行为上。
+- **修复（两条都给，互为保险）**：
+  1. workflow：`echo "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" >> "$GITHUB_ENV"`（`$HOME` 在双引号内会展开，已实测）；或更省事——job 级 `env:` 写死 `/home/runner/.cache/ms-playwright`。
+  2. **代码级根治（推荐）**：`conftest.py` 的 `setdefault` 改为**仅当项目内目录存在时**才设置：
+     ```python
+     _local = Path(__file__).parent / ".playwright-browsers"
+     if _local.exists():
+         os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(_local))
+     ```
+     本地目录存在 → 走项目内（M4 的修复不回退）；CI 上不存在 → 用 Playwright 默认 → 与 `playwright install` 落点天然一致，workflow 那行可以直接删掉。**这是把"环境约定"从 YAML 挪回代码的解**。
+
+## 4. P2
+
+### P2-1：CI 不执行 DB 层，负对照 canary 的报警价值在 CI 中为 0
+- workflow 只跑 `-m api` / `-m ui` / `-m e2e`；`-m db`（2 条 + `xfail(strict)` canary）在 CI 中永不执行。
+- 影响：M6 的 DB 校验层在 CI 层面无回归防护；而 canary 的设计初衷正是"断言失效时报警"——它在 CI 里连跑都不跑。
+- 修复建议：二选一并写进 README —— (a) 明确声明"DB 层不在 CI 覆盖范围，理由与补齐条件"；(b) 用 service container 起 MySQL 跑 DB 层。当前 README 只说了"DB 用例自动 skip"，没说明"所以 CI 对 DB 层零覆盖"这一后果。
+
+### P2-2：度量脚本 Windows-only，CI（ubuntu）无法复跑
+- `scripts/flake_measure.ps1` 是 PowerShell；CI runner 是 ubuntu，且 workflow 里没有对应步骤。
+- 影响："度量机制化"只在 Windows 成立；换环境/换人（或想把度量接进 CI）就断掉。而这套机制的诉求恰恰是"换人换时段都可复现"。
+- 修复建议：补一个 bash 版（或直接用 pytest 插件形式实现，跨平台且可进 CI）。
+
+### P2-3：三个层的 pytest 调用互相独立，任一层失败后续层被跳过
+- `-m api` / `-m ui` / `-m e2e` 是三个独立 step，无 `if: always()`；API 层红 → UI/e2e **不执行**。
+- 影响：这符合"先跑快的"设计，但会掩盖"UI/e2e 是否也坏"的信息；在公网 flake 环境下（api 曾出现 requests 瞬态）可能一次 flake 就吃掉整轮 UI 覆盖。
+- 修复建议：给 UI/e2e 步加 `if: always()`（或 `continue-on-error` + 汇总判断），让一次运行拿到全量的分层结果；pipeline 最终仍需在任一层红时判红。
+
+## 5. P3
+
+1. `~` 写法即使按上面修好，也建议在 workflow 顶部注释说明"为什么必须显式声明浏览器路径"（现有注释已写，改路径后同步更新）。
+2. workflow 不生成 Allure HTML（只上传 results），符合常见分工，建议在 README 说明"报告在本地 generate 或由 artifact 下载后生成"，避免读者以为 CI 会出报告。
+3. 无 `concurrency` 配置，同一分支连推会并发跑满 runner；建议加 `concurrency: {group: ${{ github.ref }}, cancel-in-progress: true}`。
+4. `timeout-minutes: 30` 对"公网 UI + e2e + 依赖安装 + 浏览器安装"在当前实测（公网全量已 88–112s，安装约 2–3 分钟）是够的，但公网过载时段建议留观测记录后再定。
+
+## 6. M9 结论
+
+**NEEDS_FIX**（P0：UI/e2e 在 CI 中无法执行，判定依赖已声明的单条不确定性；P2×3）。
+
+---
+
+# 本轮总账更新
+
+## 新增 P1/P0（追加到上文索引）
+
+| # | 模块 | 问题 | 状态 |
+|---|---|---|---|
+| 7 | M7 | 纯 API/DB 层失败零留痕（dump 只挂在 page fixture），与自述"API 日志是唯一现场"矛盾 | ❌ 未闭环 |
+| 8 | M7–M9 | 审查窗口内工作区 ≠ 提交态（未提交 WIP + 故意失败探针留在 tests/ → 套件恒红）；门禁顺序第 3、4 次违规 | ❌ 未闭环 |
+| 9 | M9 | `PLAYWRIGHT_BROWSERS_PATH=~/.cache/...` 在 bash 双引号内不展开 + Playwright 不展开 `~` → CI 的 UI/e2e 必然找不到浏览器 | ❌ 未闭环 |
+
+## 上轮未闭环项更新（不删行，只改状态）
+
+| 编号 | 内容 | 状态 |
+|---|---|---|
+| M6 P2-1 | goto 重试可观测性 | ✅ 闭环（`RETRY_COUNT` 实测输出 `retried x4`） |
+| M6 P2-3 | 分页竞态 + 清理校验 | ✅ 闭环（语义断言 + 三处清理均校验） |
+| M6 P2-2 | 度量机制化 + CI 目标环境策略 | ✅ 机制与声明已闭环；⚠️ **CI 策略的实际有效性受 M9 P0 阻断**，需在 M9 修好后重新确认 |
+| M6 P3-2 | 负对照固化 | ✅ 闭环（且解法优于建议：`xfail(strict=True)` 常驻 canary） |
+| M6 P3-1/P3-5 | reports/.gitkeep、README marker、口径、口令一致性 | ✅ 闭环 |
+
+## 需要 Builder 决策/处理的前置项（本轮结束时的门禁状态）
+
+1. **M7**：修 P1-1（留痕改为钩子统一收口，覆盖全部 4 层）
+2. **M9**：修 P0（workflow 行级 + `conftest` 代码级双保险），并**真正触发一次 GitHub Actions**（这是 M9 的 DoD，`act` 跑不通不等于免测——可先推到私有临时仓库验证）
+3. **M10（WIP）**：在 M7/M8/M9 未 APPROVED 前不要提交；并把探针类文件从被收集目录移出或删除
+4. **M8**：随 M7 的 P1-1 一并修 attachment 覆盖；确认提交时 `test_m8_probe.py` 已删除
+
+## 审查者提示
+
+本轮三个模块连做，最大的风险不是某一处代码，而是**"验证取样偏向容易通过的路径"这个模式已连续出现在 M6（门控只测顺利路径）、M7（三类失败样本全是浏览器层）、M9（浏览器路径只在 YAML 里改、没在 runner 上验证过）**。建议在 AGENTS 里加一条硬规定：
+**任何"环境/路径/门控/留痕"类改动，必须构造至少一个"不利条件"用例（依赖不可达、凭证失效、CWD 不同、跨层失败）才能宣称闭环。** 本轮 P1-1、P2-1 都是这条规则能直接拦下来的问题。
