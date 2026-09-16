@@ -20,6 +20,7 @@ import re
 import requests
 
 from config import settings
+from utils.failure_artifacts import record_api_log
 
 _TOKEN_RE = re.compile(r'<auth-login[^>]*:token="([^"]+)"')
 
@@ -31,6 +32,17 @@ class OrangeHRMClient:
         self.base_url = base_url or settings.BASE_URL
         self.session = requests.Session()
         self.session.headers["Accept"] = "application/json"
+        # M7 留痕：每个响应进入全局 API 请求日志（纯记录，不拦截、不改行为）
+        self.session.hooks["response"].append(self._log_response)
+
+    @staticmethod
+    def _log_response(resp, *args, **kwargs):
+        record_api_log(
+            resp.request.method,
+            resp.request.url,
+            resp.status_code,
+            int(resp.elapsed.total_seconds() * 1000),
+        )
 
     def login(self, username: str, password: str) -> bool:
         """完整登录流程：提取 token → 表单 POST → 返回是否成功。

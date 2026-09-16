@@ -14,6 +14,7 @@ M1 裸版（git 历史 c93f61e 可对照）每用例自建浏览器的代价：
 yield 语义：之前的代码 = setup，之后的 = teardown。
 断言失败也会执行 teardown（对比 M1：断言挂了 browser.close() 永远走不到）。
 """
+import json
 import os
 from pathlib import Path
 
@@ -27,22 +28,7 @@ from playwright.sync_api import sync_playwright
 
 from config import settings
 from pages.login_page import LoginPage
-
-
-def pytest_terminal_summary(terminalreporter, exitstatus, config):
-    """会话结束输出 goto 重试计数（独立复审二轮 P2-1：重试必须可观测）。
-
-    任何一次重试触发都会在这里显式出现——排障/审查时能区分
-    "flaky 消失"（计数 0）与"flaky 被重试救回"（计数 > 0），
-    "3/3 通过"不再无法验证。计数在 pages/base.RETRY_COUNT，随
-    每次 goto 失败重试累加。
-    """
-    from pages.base import RETRY_COUNT
-
-    if RETRY_COUNT:
-        lines = " · ".join(f"{url} retried x{n}" for url, n in RETRY_COUNT.items())
-        terminalreporter.write_sep(
-            "=", f"goto 重试（AGENTS §14 环境噪声吸收）: {lines}", yellow=True)
+from utils.failure_artifacts import make_artifact_paths
 
 
 @pytest.fixture(scope="session")
@@ -58,13 +44,107 @@ def browser(playwright):
     browser.close()
 
 
-@pytest.fixture  # 默认 function：每个用例一个干净页面
-def page(browser):
-    context = browser.new_context()
+def pytest_configure(config):
+    """M7 留痕基础设施：失败 nodeid 收集容器 + 产物目录就位。"""
+    config.m7_failed_nodeids = set()
+    for d in (Path("reports") / sub for sub in ("screenshots", "traces", "logs")):
+        d.mkdir(parents=True, exist_ok=True)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_makereport(item, call):
+    """收录失败用例 nodeid（setup/call 任一失败都算——teardown 留痕用）。"""
+    if call.when in ("setup", "call") and call.excinfo is not None:
+        item.config.m7_failed_nodeids.add(item.nodeid)
+
+
+def _dump_failure_artifacts(request, page, context, netlog):
+    """失败现场留痕（M7）：截图 + Playwright Trace + 浏览器请求/响应日志。
+
+    顺序敏感：必须在本 fixture 的 context.close() 之前执行（页面还活着才能截）。
+    成功用例不走这里——成功路径无产物，报告不被成功噪音污染。
+    """
+    from utils.failure_artifacts import API_LOG
+
+    paths = make_artifact_paths(request.node.nodeid)
+    try:
+        page.screenshot(path=str(paths["screenshot"]), full_page=True)
+    except Exception as exc:  # 留痕失败不能掩盖原始失败原因
+        paths["screenshot"] = None
+        print(f"[M7] 截图失败（已跳过，不掩盖原失败）: {exc}")
+    try:
+        context.tracing.stop(path=str(paths["trace"]))
+    except Exception as exc:
+        paths["trace"] = None
+        print(f"[M7] Trace 导出失败（已跳过，不掩盖原失败）: {exc}")
+    paths["netlog"].write_text(
+        json.dumps(netlog, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    if API_LOG:
+        paths["api_log"].write_text(
+            json.dumps(API_LOG, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+    else:
+        paths["api_log"] = None
+    request.config.m7_failure_paths = getattr(request.config, "m7_failure_paths", [])
+    request.config.m7_failure_paths.append((request.node.nodeid, paths))
+
+
+def _new_page_with_tracing(browser, **context_kwargs):
+    """开一个带 M7 留痕的浏览器 context：Trace 全程录制（内存）+ 请求/响应收集。
+
+    返回 (context, page, netlog)。成功用例 teardown 时 trace 直接丢弃，
+    失败用例导出——只在失败时产生磁盘产物，成功路径零开销（除内存 trace）。
+    """
+    context = browser.new_context(**context_kwargs)
+    context.tracing.start(screenshots=True, snapshots=True)
     page = context.new_page()
     page.set_default_timeout(settings.DEFAULT_TIMEOUT * 1000)
-    yield page
+    netlog: list[dict] = []
+    # 只记不改：不拦截、不影响 Playwright 行为（日志不参与断言）
+    page.on("request", lambda r: netlog.append({"type": "req", "method": r.method, "url": r.url}))
+    page.on("response", lambda r: netlog.append({"type": "resp", "status": r.status, "url": r.url}))
+    return context, page, netlog
+
+
+def _teardown_page_flow(request, context, page, netlog):
+    """context 收尾：失败 → 留痕（截图/Trace/netlog），成功 → 丢弃 trace。"""
+    if request.node.nodeid in request.config.m7_failed_nodeids:
+        _dump_failure_artifacts(request, page, context, netlog)
+    else:
+        context.tracing.stop()  # 成功：丢弃 trace（不产磁盘垃圾）
     context.close()
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """会话结束输出：goto 重试计数（P2-1）+ M7 失败留痕产物汇总。
+
+    重试计数使「3/3 通过」可验证（计数>0 = flaky 被重试救回，非消失）；
+    M7 汇总列出每个失败用例的截图/Trace/日志路径，5 分钟定位从这里开始。
+    """
+    from pages.base import RETRY_COUNT
+
+    if RETRY_COUNT:
+        lines = " · ".join(f"{url} retried x{n}" for url, n in RETRY_COUNT.items())
+        terminalreporter.write_sep(
+            "=", f"goto 重试（AGENTS §14 环境噪声吸收）: {lines}", yellow=True)
+
+    paths = getattr(config, "m7_failure_paths", [])
+    if paths:
+        terminalreporter.write_sep("=", f"M7 失败留痕（{len(paths)} 用例）", red=True)
+        for nodeid, art in paths:
+            terminalreporter.write_line(f"  {nodeid}")
+            for kind, p in art.items():
+                if p is not None:
+                    terminalreporter.write_line(f"    {kind:10s} -> {p}")
+
+
+@pytest.fixture
+def page(browser, request):
+    """匿名浏览器页（登录测试专用）。M7 起带失败留痕：失败 → 截图/Trace/log。"""
+    context, page, netlog = _new_page_with_tracing(browser)
+    yield page
+    _teardown_page_flow(request, context, page, netlog)
 
 
 @pytest.fixture
@@ -136,17 +216,15 @@ def ui_auth_state(api_client):
 
 
 @pytest.fixture  # function：每用例独立 context，仅共享登录态 cookie
-def ui_auth_page(browser, ui_auth_state):
+def ui_auth_page(browser, ui_auth_state, request):
     """免登录 page：独立 context + 共享登录态。
 
     与 page fixture 的区别：page 匿名（登录测试专用，登录本身是被测对象时
     绝不能用本 fixture——那等于把被测前提变成了注入的假状态）。
     """
-    context = browser.new_context(storage_state=ui_auth_state)
-    page = context.new_page()
-    page.set_default_timeout(settings.DEFAULT_TIMEOUT * 1000)
+    context, page, netlog = _new_page_with_tracing(browser, storage_state=ui_auth_state)
     yield page
-    context.close()
+    _teardown_page_flow(request, context, page, netlog)
 
 
 # ---- M6：DB 校验层（仅本地 Docker 环境）----
