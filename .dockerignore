@@ -1,0 +1,13 @@
+# M10 .dockerignore：镜像只带测试代码，不带本地环境/产物
+.venv/
+.playwright-browsers/
+reports/
+.pytest_cache/
+__pycache__/
+**/__pycache__/
+*.pyc
+.git/
+.gitignore
+.env
+chromedriver.exe
+.workbuddy/
