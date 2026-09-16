@@ -37,6 +37,20 @@ class PIMApi:
             timeout=settings.DEFAULT_TIMEOUT,
         )
 
+    def list_employees_by_last_name(self, last_name: str, limit: int = 5, offset: int = 0):
+        """GET ?lastName=（负向用例专用，2026-09-15 本地实测）。
+
+        lastName 是服务端不认的查询参数 → 422 Invalid Parameter，且响应体
+        error.data.invalidParamKeys 会指明被拒的参数名。保留为参数校验行为
+        的回归锚点：若未来后端开始接受 lastName（参数契约变化），
+        对应用例失败会提醒我们更新认知，而不是静默漂移。
+        """
+        return self.client.session.get(
+            f"{self.client.base_url}/web/index.php/api/v2/pim/employees",
+            params={"lastName": last_name, "limit": limit, "offset": offset},
+            timeout=settings.DEFAULT_TIMEOUT,
+        )
+
     def create_employee(self, first_name: str, last_name: str, middle_name: str = ""):
         """POST 创建员工（M5 实测：JSON body → 200，data.empNumber 为主键）。"""
         return self.client.session.post(

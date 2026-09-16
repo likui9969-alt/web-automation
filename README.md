@@ -13,7 +13,7 @@ UI 自动化（Playwright）+ API 自动化（Requests）+ 分层测试设计 + 
 - [x] M3：POM 重构，定位器集中到 LoginPage，实测 **5 passed 43.24s**（含 Demo 站时段性过载的 flaky 治理：domcontentloaded 等待策略 + 超时 20s 校准，过程留痕）
 - [x] M4：API 层（requests 会话客户端 + PIM 接口封装），**5 passed 14.34s**（P2-1 修复后复跑 16.57s）；全量 UI+API **10 passed 65.40s**
 - [x] M5：混合造数（数据工厂唯一命名 + API cookie 注入 storage_state 会话复用 + e2e 双向闭环），**全量 12 passed**（Builder 111.68s / Reviewer 104.26s 双绿）；两次真实排障（Save 后竞态 → toast 语义等待；expect 断言 5s 盲区 → 超时校准）
-- [x] M6：本地 Docker 部署（OrangeHRM 5.9 + MySQL 8.0，无人值守安装器）+ DB 持久化校验层（pymysql 只读、ohrm_ro 最小权限账号、环境门控 skip），**本地全量 14 passed in 9.49s**（公网同套 12 条 104~111s，~11 倍速差；Reviewer 复跑 9.65s）；两次真实排障（解释器错位 → 项目 venv；localhost cookie domain 陷阱 → domain 取 BASE_URL host）；DB 层发现：API 创建员工的 employee_id 为 NULL（显示编号不在 API 路径生成）。Review APPROVED（断言预算收敛 ASSERT_TIMEOUT_MS ×5 处 + 稳定性 5/5）
+- [x] M6：本地 Docker 部署（OrangeHRM 5.9 + MySQL 8.0，无人值守安装器）+ DB 持久化校验层（pymysql 只读、ohrm_ro 最小权限账号、环境门控 skip）。**本地全量 18 条通过**（独立复审实测极差区间约 4~9 倍于公网同套，具体视用例集与时段；本地确定性 5/5）；两次真实排障（解释器错位 → 项目 venv；localhost cookie domain 陷阱 → domain 取 BASE_URL host）。**状态：NEEDS_FIX（独立复审 P1-1/P1-2/P1-3，M6 原 APPROVED 因审查节由实现方代笔被所有者裁定作废；修复在途，见 MODULE_FEEDBACK）**
 - [ ] M7–M11：失败定位 → Allure → CI → 模拟环境
 
 ## 目录结构与设计理由
@@ -25,12 +25,13 @@ UI 自动化（Playwright）+ API 自动化（Requests）+ 分层测试设计 + 
 ├── tests/
 │   ├── ui/          # 按层分目录：CI 先跑快的 API 再跑慢的 UI，失败快速反馈
 │   ├── api/
-│   └── e2e/         # 区分"纯 UI 验证"和"UI+API 混合业务闭环"（M5）
+│   ├── e2e/         # 区分"纯 UI 验证"和"UI+API 混合业务闭环"（M5）
+│   └── db/          # DB 持久化校验：API/UI 操作 → 直查 MySQL 比对（M6，仅本地环境）
 ├── data/            # 测试数据与代码分离，改数据不改逻辑（M2）
 ├── utils/           # 数据工厂、DB client 等被多处复用的工具（按需）
 ├── reports/         # Allure/截图/Trace 产物，已 gitignore（M7/M8）
 ├── conftest.py      # 全局共享 fixture：浏览器实例、登录态（M2）
-├── pytest.ini       # 入口固定 + strict-markers + ui/api 分层 marker
+├── pytest.ini       # 入口固定 + strict-markers + ui/api/e2e/db 四层 marker
 └── requirements.txt # 任何机器一键还原一致环境
 ```
 
@@ -71,8 +72,9 @@ python -m pytest              # 全量
 # 1. 拉起本地被测系统（首次含镜像拉取）
 docker compose -f docker/docker-compose.yml up -d
 
-# 2. 首次：无人值守安装（配置文件在 docker/cli_install_config.yaml，
-#    安装器会自动删除容器内含明文密码的 yaml）
+# 2. 首次：无人值守安装（配置文件在 docker/cli_install_config.yaml；
+#    console 版安装器纯交互式且拒绝 -n，cli_install.php 才是读配置文件
+#    的非交互入口——2026-09-15 实测；安装器会自动删除容器内的 yaml）
 docker cp docker/cli_install_config.yaml ohrm-app:/var/www/html/installer/
 docker exec -w /var/www/html ohrm-app php installer/cli_install.php
 
@@ -84,11 +86,28 @@ $env:ORANGEHRM_BASE_URL = "http://localhost:8080"
 $env:ORANGEHRM_USERNAME = "Admin"
 $env:ORANGEHRM_PASSWORD = "Admin@Local1"
 python -m pytest -m db         # DB 持久化校验（仅本地环境，其他环境自动 skip）
-python -m pytest              # 全量 14 条
+python -m pytest              # 全量 18 条
 ```
 
 不设上述环境变量时默认跑公网 Demo（DB 用例自动 skip）。
 MySQL 经宿主机 13306 端口暴露，测试用只读账号 `ohrm_ro` 校验（仅 SELECT，实测 INSERT 被拒）。
+
+**从零重建（一次性破坏性操作，独立复审 P2-3 实测留痕）**：
+compose 为 DB 预置了空库 `orangehrm` 与用户 `ohrm`，而安装器以
+`isExistingDatabase: n` 自建库——重建时先 DROP 预置对象保证语义一致，再走首次安装流程：
+
+```powershell
+# 1. 删除容器与数据卷（本地数据全部清空，不可恢复）
+docker compose -f docker/docker-compose.yml down -v
+# 2. 重新拉起
+docker compose -f docker/docker-compose.yml up -d
+# 3. 等 db healthy 后，DROP 预置空库/用户（on-new-database 语义一致）
+docker exec ohrm-db mysql -uroot -proot_password_local -e "DROP DATABASE IF EXISTS orangehrm; DROP USER IF EXISTS 'ohrm'@'%'; FLUSH PRIVILEGES;"
+# 4. 之后重复上面第 2-4 步（安装、建只读账号、切环境变量）
+```
+
+> 端口已按独立复审 P2-5 绑定 `127.0.0.1`（仅本机可访问）；口令默认值见
+> [docker/.env.example](docker/.env.example)，改口令时可复制为 `.env` 覆盖（已被 .gitignore 屏蔽）。
 
 ## 被测系统硬约束（项目设计依据）
 

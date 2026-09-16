@@ -15,3 +15,7 @@ INVALID_CREDENTIAL_CASES = [
     ("nosuchuser", "admin123"),     # 错误用户名
     ("nosuchuser", "wrongpass123"), # 双双错误
 ]
+
+# 错误密码（API 层 API-02 单独用，与上面参数组同源语义——Review 整改 R-06：
+# 此前 API 测试内联硬编码 "wrongpass123"，与数据分离原则不一致，同仓库两种做法）
+WRONG_PASSWORD = "wrongpass123"

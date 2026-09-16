@@ -11,7 +11,11 @@ venv/
 .pytest_cache/
 
 # 测试产物（M7/M8 生成）
-reports/
+# reports/ 整目录忽略会让 .gitkeep 失效（全面复审 P3-1：目录占位符
+# 被吞，README「每个空目录有 gitkeep」承诺落空）——改为忽略内容、
+# 例外放行 .gitkeep；其余三个目录当前无占位符，保持整目录忽略
+reports/*
+!reports/.gitkeep
 screenshots/
 traces/
 allure-results/

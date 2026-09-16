@@ -32,7 +32,10 @@ def api_created_employee(pim_api):
     assert resp.ok, f"造数失败: {resp.status_code} {resp.text[:200]}"
     emp_number = resp.json()["data"]["empNumber"]
     yield {"payload": payload, "empNumber": emp_number}
-    pim_api.delete_employee(emp_number)
+    # teardown 校验清理结果（全面复审 P3-4 / 整改 R-07）：失败报 error 而非
+    # 静默残留——清理失败意味着环境残留测试数据，可见性比"用例全绿"更重要
+    resp = pim_api.delete_employee(emp_number)
+    assert resp.ok, f"teardown 清理失败（emp_number={emp_number} 将残留）: {resp.status_code}"
 
 
 def test_api_created_employee_visible_in_ui(api_created_employee, ui_auth_page):

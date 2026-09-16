@@ -90,6 +90,13 @@ def ui_auth_state(api_client):
     注入的 cookie 送不出去 → 被 302 回登录页。cookie 能否送达只取决于
     domain 与访问主机是否匹配，会话凭证是 value——所以 domain 直接用
     实际访问的主机，跨环境（demo 域名 / localhost）都成立。
+
+    其余属性为何硬编码（Review P3，M2/M6 已裁定不改代码）：
+    - httpOnly=True：M0 实测当前系统仅一个 orangehrm cookie 且为 HttpOnly，
+      多 cookie 场景需从 Set-Cookie 解析再改（YAGNI）
+    - secure=False：必须为 False——本地环境是 http://localhost:8080，
+      设 True 则本地 cookie 不发送；且 secure 对会话凭证送达无影响
+    - sameSite=Lax：注入用，与真实 Set-Cookie（Lax）一致
     """
     from urllib.parse import urlparse
 

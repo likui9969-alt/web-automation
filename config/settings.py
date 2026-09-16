@@ -26,6 +26,8 @@ DEFAULT_TIMEOUT = int(os.getenv("ORANGEHRM_TIMEOUT", "20"))
 # 漂移——收敛到这一处，调预算只改一个数字。
 ASSERT_TIMEOUT_MS = DEFAULT_TIMEOUT * 1000
 # 有头/无头：调试失败用例时 ORANGEHRM_HEADLESS=false 看着浏览器跑，不用改代码
+# 解析约定（Review P3-3，M2 Review 已裁定不改代码）：仅接受字符串 "true"，
+# 其他值（false/1/yes/0）一律视为 False——首次使用请严格用 true/false
 HEADLESS = os.getenv("ORANGEHRM_HEADLESS", "true").lower() == "true"
 
 # ---- M6：本地 Docker 环境的 MySQL 直连配置（DB 校验层专用）----

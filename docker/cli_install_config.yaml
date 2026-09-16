@@ -1,9 +1,12 @@
 # M6：OrangeHRM 5.9 无人值守安装配置（本地 Docker 副本专用）
 # 原始模板位置：容器内 /var/www/html/installer/cli_install_config.yaml
-# 用法：
-#   docker cp docker/cli_install_config.yaml ohrm-app:/var/www/html/installer/cli_install_config.yaml
-#   docker exec -w /var/www/html ohrm-app php installer/console install:on-new-database -n
-# 注意：旧入口 cli_install.php 已废弃（运行时会打印弃用告警并指向上面的 console 命令）
+# 用法（2026-09-15 实测修正，P2-3）：console 版（install:on-new-database）纯交互式
+#   且拒绝 -n（stdin 为空时 getRequiredField() 崩溃）；cli_install.php 才读本配置文件
+#   非交互执行（打印弃用告警但可用）。安装完成后安装器会自动删除容器内本 yaml。
+#   docker cp docker/cli_install_config.yaml ohrm-app:/var/www/html/installer/
+#   docker exec -w /var/www/html ohrm-app php installer/cli_install.php
+# 重建注意：安装前需先 DROP compose 预置的空库/用户（on-new-database 语义一致），
+#   步骤见 README「本地 Docker 环境」节。
 
 database:
   hostName: db                # compose 服务名，同网络内 DNS 解析（不能用 127.0.0.1——容器内无 MySQL）

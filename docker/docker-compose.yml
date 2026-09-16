@@ -8,6 +8,12 @@
 #   8080  -> app（HTTP，BASE_URL 切 http://localhost:8080 即本地测试）
 #   13306 -> MySQL（宿主机非默认端口，避免与本机既有 MySQL 冲突；pymysql 直连用）
 #
+# 安全（独立复审 P2-5 修复）：
+#   - 端口绑定 127.0.0.1（loopback）：被测系统与 MySQL 不对局域网其他机器可见，
+#     默认 "8080:80" 等价于绑定全部网卡，公开仓库前必须收回
+#   - 口令走 compose 变量 ${VAR:-默认}：默认值保持可直接运行（与 .env.example 一致），
+#     需要改口令时复制 .env.example 为 .env 覆盖即可（.env 已被 .gitignore 屏蔽）
+#
 # 首次启动需走 web installer（或容器内 CLI）：见 MODULE_FEEDBACK M6 验证记录。
 
 services:
@@ -15,18 +21,18 @@ services:
     image: mysql:8.0
     container_name: ohrm-db
     environment:
-      MYSQL_ROOT_PASSWORD: root_password_local
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password_local}
       MYSQL_DATABASE: orangehrm
       MYSQL_USER: ohrm
-      MYSQL_PASSWORD: ohrm_password_local
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ohrm_password_local}
     # pymysql 免 caching_sha2 依赖坑：本地学习环境用 native password 足够
     command: --default-authentication-plugin=mysql_native_password
     ports:
-      - "13306:3306"
+      - "127.0.0.1:13306:3306"
     volumes:
       - ohrm_dbdata:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot_password_local"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-root_password_local}"]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -35,7 +41,7 @@ services:
     image: orangehrm/orangehrm:5.9
     container_name: ohrm-app
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     depends_on:
       db:
         condition: service_healthy

@@ -8,17 +8,22 @@
 无一条"理论上应该如此"。
 
 测试点：
-- API-01 正确凭证登录成功（302 → dashboard）
+- API-01 正向登录成功（302 → dashboard）
 - API-02 错误凭证登录失败（302 回登录页，不建立会话）
 - API-03 未登录调业务接口 → 401 "Session expired"（会话校验）
 - API-04 登录后员工列表 → 200 + JSON 结构 + 关键字段
 - API-05 limit 分页语义：返回条数受控、total 不受影响
+- API-06/07 用户名大小写与空格的服务端规则（LOGIN-07/08，M0 指派 API 层）
+- API-08 无效查询参数 → 422（M5 探测实证，Review 整改 R-01 落地）
+- API-09 删除不存在的记录 → 404（M5 探测实证，Review 整改 R-01 落地）
 """
 import pytest
 
 from api.client import OrangeHRMClient
 from api.pim import PIMApi
 from config import settings
+from data.credentials import WRONG_PASSWORD
+from utils.factory import make_employee
 
 pytestmark = pytest.mark.api  # 分层 marker：CI 里 pytest -m api 先跑快的接口层
 
@@ -40,7 +45,7 @@ def test_login_success():
 def test_login_wrong_password():
     # API-02：错误凭证 → 登录失败（M0 UI 实测同源结论的接口层验证）
     client = OrangeHRMClient()
-    assert client.login(settings.USERNAME, "wrongpass123") is False
+    assert client.login(settings.USERNAME, WRONG_PASSWORD) is False
 
 
 def test_employees_requires_session():
@@ -52,16 +57,30 @@ def test_employees_requires_session():
 
 
 def test_employees_list_structure(pim):
-    # API-04：登录后 → 200 + 结构三件套 + 员工关键字段
-    resp = pim.list_employees()
-    assert resp.status_code == 200
-    body = resp.json()
-    assert isinstance(body["data"], list)
-    assert body["meta"]["total"] > 0  # 共享环境实测 331+ 条，恒大于 0
-    # 首条记录关键字段（实测字段名，M5 数据工厂依赖 employeeId 等）
-    first = body["data"][0]
-    for field in ("empNumber", "lastName", "firstName", "employeeId"):
-        assert field in first
+    # API-04：登录后 → 200 + 结构三件套 + 员工关键字段。
+    # 结构断言不依赖环境既有数据（全面复审 P2-2）：自造一条唯一员工——
+    # total >= 1 由"刚创建"保证（设计保证，非"环境里恰好有人"的运气），
+    # 关键字段断言取 search_by_name 命中的自己那条，不碰 data[0]
+    # （list 默认 limit=50，自己的记录未必在第一页；唯一名搜索则必然命中）
+    emp = make_employee()
+    resp = pim.create_employee(emp["firstName"], emp["lastName"], emp["middleName"])
+    assert resp.ok, f"造数失败: {resp.status_code} {resp.text[:200]}"
+    emp_number = resp.json()["data"]["empNumber"]
+    try:
+        resp = pim.list_employees()
+        assert resp.status_code == 200
+        body = resp.json()
+        assert isinstance(body["data"], list)
+        assert body["meta"]["total"] >= 1
+        # 关键字段（实测字段名，M5 数据工厂依赖 employeeId 等）：
+        # 模糊搜索唯一 lastName 后按主键精确过滤出自己那条
+        matched = pim.search_by_name(emp["lastName"]).json()["data"]
+        mine = [e for e in matched if e["empNumber"] == emp_number]
+        assert mine, "刚创建的员工搜不到——落库失败或搜索接口异常"
+        for field in ("empNumber", "lastName", "firstName", "employeeId"):
+            assert field in mine[0]
+    finally:
+        pim.delete_employee(emp_number)
 
 
 def test_employees_pagination_limit(pim):
@@ -72,3 +91,39 @@ def test_employees_pagination_limit(pim):
     assert len(body["data"]) == 1
     full = pim.list_employees().json()
     assert body["meta"]["total"] == full["meta"]["total"]
+
+
+def test_login_username_case_insensitive():
+    # API-06 / LOGIN-07：用户名不区分大小写（M0 Demo UI 实测，接口层回归）。
+    # 用户名取 settings 而非硬编码 "Admin"——Demo 与本地 Docker 双环境通用
+    # （本地行为 2026-09-15 实测与 Demo 一致：upper() 登录成功）
+    client = OrangeHRMClient()
+    assert client.login(settings.USERNAME.upper(), settings.PASSWORD) is True
+
+
+def test_login_username_whitespace_rejected():
+    # API-07 / LOGIN-08：用户名不做 trim（M0 Demo 实测" Admin "登录失败）。
+    # 带空格用户名 + 正确密码 → 拒绝：证明服务端不自动去首尾空格
+    # （本地行为 2026-09-15 实测一致：False）
+    client = OrangeHRMClient()
+    assert client.login(f" {settings.USERNAME} ", settings.PASSWORD) is False
+
+
+def test_employees_invalid_param_rejected(pim):
+    # API-08：无效查询参数 → 422（M5 探测实证，响应体结构本地实测）。
+    # 断言两层：error.message 文案 + invalidParamKeys 指明被拒参数名——
+    # 后者是服务端参数校验的精确信号（比单纯文案断言业务价值更高）
+    resp = pim.list_employees_by_last_name("nonexistent")
+    assert resp.status_code == 422
+    error = resp.json()["error"]
+    assert error["message"] == "Invalid Parameter"
+    assert "lastName" in error["data"]["invalidParamKeys"]
+
+
+def test_delete_missing_employee_404(pim):
+    # API-09：删除不存在的记录 → 404（M5 探测实证）。
+    # empNumber 用远超自增范围的值——共享环境他人数据再多也不误伤；
+    # 不存在 → 不产生数据，无需清理
+    resp = pim.delete_employee(999_999_999)
+    assert resp.status_code == 404
+    assert resp.json()["error"]["message"] == "Records Not Found"

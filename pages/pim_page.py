@@ -9,7 +9,7 @@ M5 探测实测（2026-09-15，DOM 摸底）：
 - 表格行 ".oxd-table .oxd-table-row"；空结果显示 "No Records Found"
 - Add 表单：First/Middle/Last Name placeholder + Save 按钮
 """
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, TimeoutError, expect
 
 from config import settings
 
@@ -30,7 +30,13 @@ class PimPage:
     def open(self) -> "PimPage":
         # SPA 同款等待策略（M3 教训）：domcontentloaded + 首行 attached
         # 首行到达 = 列表数据渲染完成，搜索框已可交互
-        self.page.goto(f"{settings.BASE_URL}{self.URL_PATH}", wait_until="domcontentloaded")
+        try:
+            self.page.goto(f"{settings.BASE_URL}{self.URL_PATH}", wait_until="domcontentloaded")
+        except TimeoutError:
+            # goto 单次重试（独立复审 P1-2 整改）：与 LoginPage.open() 同款——
+            # 公网共享 Demo 导航超时是环境噪声，AGENTS §14 合规的重试仅吸收噪声、
+            # 到第二次为止，不改变断言与结论
+            self.page.goto(f"{settings.BASE_URL}{self.URL_PATH}", wait_until="domcontentloaded")
         self.page.wait_for_selector(".oxd-table .oxd-table-row", state="attached")
         return self
 

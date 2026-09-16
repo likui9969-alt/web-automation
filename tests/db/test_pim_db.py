@@ -13,12 +13,13 @@ API 返回 200、UI 显示 "Successfully Saved"，数据就真的持久化正确
 竞态（先查不到后查到）——OrangeHRM 同步写库，2026-09-15 探测实测为
 操作返回即可查到，无等待窗口。
 
-实测依据（2026-09-15 _probe_m6.py 探测，非推测）：
+实测依据（2026-09-15 _probe_m6.py 探测 + 独立复审双向对照，非推测）：
 - API 创建 → 行存在，emp_firstname/emp_lastname 与提交一致，purged_at NULL
 - API 删除 → 行物理消失（硬删，purged_at 未被使用），API 搜索同步归零
-- 意外发现：API 创建的员工 employee_id 为 NULL（显示编号不在 API 创建路径
-  生成）——API 层看不到的真相，恰是 DB 校验层价值的直接证据。
-  用例不对此断言：机制未完全查明（UI 路径行为未对照），断言它属于过度耦合
+- 硬删 vs 软删才是「DB 校验层的真实价值」：软删时行仍在 + 标记位，API 视角
+  无法区分（API 会过滤软删行），只有查库知道。employee_id 在创建后为 NULL
+  属 API 响应可见事实（响应体含 employeeId: None），不构成 DB 层论据——
+  M6 独立复审 P2-2 修正，代码注释同步改正
 """
 import pytest
 
@@ -39,11 +40,15 @@ def pim_api(api_client) -> PIMApi:
     return PIMApi(api_client)
 
 
-def test_api_created_employee_persisted_in_db(pim_api, db_client):
+def test_api_created_employee_persisted_in_db(db_client, pim_api):
     """API 创建员工 → hs_hr_employee 行存在且字段一致。
 
     这是「页面/接口显示成功 ≠ 成功」的最直接反例构造：
     如果应用存在异步写失败/字段截断/触发器改写，本用例会当场暴露。
+
+    参数序（P1-1 修复）：db_client 在签名首位——pytest 按参数从左到右
+    实例化 fixture，门控（skip/raise）先于 pim_api → api_client 求值，
+    保证非本地环境"不产生任何网络调用就 skip"，而非先公网登录再 skip。
     """
     emp = make_employee()
     resp = pim_api.create_employee(emp["firstName"], emp["lastName"], emp["middleName"])
@@ -60,22 +65,29 @@ def test_api_created_employee_persisted_in_db(pim_api, db_client):
         pim_api.delete_employee(emp_number)
 
 
-def test_api_deleted_employee_removed_from_db(pim_api, db_client):
+def test_api_deleted_employee_removed_from_db(db_client, pim_api):
     """API 删除员工 → DB 行物理移除（硬删）。
 
     删除验证的价值：M5 只从 API 搜索归零推断"删干净了"，本用例下沉到
     行级确认——如果 OrangeHRM 实际是软删（行还在 + 标记位），API 视角
     看不出来，只有查库知道。实测为硬删，断言按真实行为写。
+
+    失败安全清理（独立复审 P2-1 修复）：delete 断言失败时员工已创建，
+    finally 兜底删除——否则残留永久行，破坏"DB 零残留"基线；
+    容忍 404 = 员工已被删（幂等，重复删无害）。
     """
     emp = make_employee()
     resp = pim_api.create_employee(emp["firstName"], emp["lastName"], emp["middleName"])
     assert resp.ok, f"前置创建失败：{resp.status_code}"
     emp_number = resp.json()["data"]["empNumber"]
-
-    assert pim_api.delete_employee(emp_number).ok, "API 删除失败"
-
-    row = db_client.query_one(
-        "SELECT emp_number FROM hs_hr_employee WHERE emp_number = %s",
-        (emp_number,),
-    )
-    assert row is None, "API 已删但行仍留在库中（实测为硬删，应物理移除）"
+    try:
+        assert pim_api.delete_employee(emp_number).ok, "API 删除失败"
+        row = db_client.query_one(
+            "SELECT emp_number FROM hs_hr_employee WHERE emp_number = %s",
+            (emp_number,),
+        )
+        assert row is None, "API 已删但行仍留在库中（实测为硬删，应物理移除）"
+    finally:
+        cleanup = pim_api.delete_employee(emp_number)
+        assert cleanup.status_code in (200, 404), \
+            f"失败安全清理异常（emp_number={emp_number} 可能残留）: {cleanup.status_code}"
