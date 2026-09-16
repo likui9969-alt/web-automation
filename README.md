@@ -128,6 +128,31 @@ docker exec ohrm-db mysql -uroot -proot_password_local -e "DROP DATABASE IF EXIS
 > Select-String -Path docker\cli_install_config.yaml -Pattern "Password:"  # 实际值
 > ```
 
+## CI 与 flakes（M9，含 M6 二轮 P2-2 闭环）
+
+### CI 目标环境策略（2026-09-16 决策）
+
+CI 固定跑**公网 Demo**（项目默认目标，见上），DB 用例按环境门控自动 skip
+（见 conftest 双重门控）——不红、不假绿。**不选本地 Docker 作为 CI 目标**，理由：
+
+1. CI runner 无 Docker daemon：起 MySQL + OrangeHRM 需自装、处理成本高，且该
+   场景已在本机实测（M6），CI 重复执行价值低；M10 Docker 化时再评估 CI 内建
+2. 公网 flake 有完整兜底：M7 失败留痕（截图/Trace/请求日志）+ M8 报告附件——
+   失败可定位、可重跑，不阻塞定位
+3. requests 层不加代码重试（AGENTS §14）——实测 API 层 9 条多次全绿，Transient
+   ReadTimeout 低频且重跑即过；若频率上升（flake 记录连续 > 20%），再引入
+   urllib3 Retry 并记录在 MODULE_FEEDBACK
+
+### flake 度量命令（P2-2「有可复跑命令」）
+
+```powershell
+# 同命令 ×N，测公网失败率；结果贴到 MODULE_FEEDBACK「flake 记录」节
+.\scripts\flake_measure.ps1 -Runs 3 -Marker ui
+```
+
+任何一次 goto 重试触发都会在 pytest_terminal_summary 输出（M7 P2-1 闭环），
+flake 记录须含该计数，区分"flaky 消失"与"被重试救回"。
+
 ## 被测系统硬约束（项目设计依据）
 
 1. Demo 数据库不可直连 → DB 校验放在本地 Docker 部署环境（M6）
