@@ -18,6 +18,7 @@
 | M8 Allure 报告 | APPROVED_WITH_FIXES | 2026-09-16 | allure-pytest 2.16.0 + allure CLI 2.43.0（npm 镜像装）。**四元素落地**：feature（4 个业务模块归类 via pytestmark）、title（每条用例中文可读）、severity（critical 8 + normal 10，按业务价值分级）、attachment（失败现场截图进报告——**关键坑**：fixture teardown 时 Allure 上下文已关闭 attach 被静默丢弃，改在 pytest_runtest_makereport 的 call 阶段截图+attach，实测 attachment 正确关联 failed 用例）。pytest.ini `--alluredir=reports/allure-results`。**实测**：全量 18 passed + 1 xfailed → allure generate → HTML 成功生成，19 用例按 4 feature 汇总、severity 正确。README 补报告用法（含 CLI 安装）。**联合复审 APPROVED_WITH_FIXES**：P2 均继承 M7（attachment 覆盖面随 M7 修复一并解决），关闭须排在 M7 之后 |
 | M9 GitHub Actions CI | NEEDS_FIX | 2026-09-16 | .github/workflows/test.yml：push/pull_request 触发，分层执行（API 快先反馈 → UI → e2e），always 上传 allure-results、failure 上传 M7 留痕。**P2-2 硬性闭环**：① CI 目标环境策略显式化（固定公网 Demo + DB 门控 skip；不选本地 Docker 的理由与 requests 层不加重试的策略决策写入 README CI 节）② flake 度量机制化 `scripts/flake_measure.ps1`（同命令 ×N + 结果模板 + goto 重试计数位置），实测公网 api ×3 = 3/3 PASS（29.9/29.5/30.1s）。**M7–M9 联合独立复审（2026-09-16）判 NEEDS_FIX**：P0 浏览器路径写法（`~` 在 bash 双引号内不展开 + Playwright 不认 `~` → CI UI/e2e 必全 error）+ P2×3（DB 层 CI 零覆盖 / 度量脚本 Windows-only / 三层调用无 if:always 吞层）+ P3×3 + 真实 Actions 触发 **UNVERIFIED**（本机网络不可达，M11 上仓时闭环）。**Builder 整改完成（P0 代码级+文件级双保险 / P2×3 / P3 顺带）**，详见文末「Review 整改记录」节 |
 | M10 Docker 化（测试执行环境容器化） | IN_PROGRESS → WAITING_FOR_REVIEW 待确认 | 2026-09-16 | 测试执行环境（Python+Playwright+Chromium）固化为 Dockerfile 镜像（2.72GB）；docker-compose 新增 test 服务（与 app/db 同网络、shm 1gb、TRACE_SNAPSHOTS=false、reports volume）。**真实排障**：①镜像内 chromium 崩溃 FATAL SkFontMgr「Not implemented」+「Cannot load default config file」→ 根因缺 fontconfig+字体（非 snapshots 崩溃）——补 fonts-liberation 修复；②compose build 缓存陷阱：docker build 独立 tag 与 compose 镜像缓存分离，漏改字体时 compose 镜像无字体——需 `docker compose build` 而非仅 docker build。**实测（容器内连 M6 被测系统 ohrm-app）**：compose run 全量 **18 passed + 1 xfailed in 10.21s**（api 9 / ui 5 / e2e 2 / db 2+xfail，各层单独验证通过）；留痕 volume 落宿主 reports/ 实测（坏凭证注入 → api_log JSON 含 ts+nodeid 落宿主）；成功用例零留痕。PR 评价：Dockerfile 层缓存注释、非 root 用户、/dev/shm 1gb 均为面试可讲点 |
+| M11 复盘 + 简历/面试材料 | IN_PROGRESS → WAITING_FOR_REVIEW 待确认 | 2026-09-16 | 真实数据统计（用例 19 = 18P + 1 xfailed；本地 17~22s / 容器内 10~13s / 公网 140s；API vs UI 3 倍速差、本地 vs 公网 11 倍速差）＋ 简历 4 条 bullet（每条可追问到实测数字）＋ 30s/1min/3min 项目介绍（含三个排障故事 + 门禁事故故事）＋ 八个高频面试问答标准答案（Q1 Playwright 选型 / Q2 API>UI 不偷懒 / Q3 数据管理 / Q4 flaky 治理 / Q5 断言 5s 盲区 / Q6 DB 层价值 / Q7 Review 流程门禁 / Q8 项目不足）。**诚实边界**：简历不写"CI 已跑通"（Reviewer 红线：真实 Actions 触发 UNVERIFIED，只能写 workflow 已就绪） |
 
 ## 验证记录
 
@@ -361,3 +362,50 @@
 **M7：NEEDS_FIX → Builder 整改完成，等待独立复审**。**M9：NEEDS_FIX → 同上**。
 M8 关闭须排在 M7 之后。M10（Dockerfile 等 WIP）在 M7/M8/M9 未 APPROVED 前**不提交**
 （P1-C 要求）。待办：M9 真实 Actions 触发 UNVERIFIED（M11 上仓闭环）。
+
+---
+
+## M11 交付物（2026-09-16）
+
+> 全部数据来自 MODULE_FEEDBACK 验证记录实测值，无一行虚构。
+> Reviewer 红线：简历/面试不得写「CI 已跑通」——只能写「workflow 已就绪（真实触发待上仓）」。
+
+### 一、真实数据统计
+
+- 用例规模：19 = api 9 + ui 5 + e2e 2 + db 2 + canary 1（xfail 设计红）
+- 最终通过：本地全量 18 passed + 1 xfailed（17.11~22.48s 多次）；容器内 18 passed + 1 xfailed（10.21~13.15s）；公网 14P+2S+2F（requests 瞬态，重跑即过）
+- 性能实证：API vs UI 同规模 3 倍速差（14.34s vs 43.24s）；本地 vs 公网 ~11 倍速差（9.49s vs 104~112s）
+- 稳定性：goto 超时治理后 Demo ui ×3 = 3/3、api ×3 = 3/3；重试计数可观测（治理后为 0）
+- 质量体系：独立复审 3 轮、P0/P1 清零；门禁事故 2 次沉淀为 AGENTS §13.1
+
+### 二、简历 bullet（4 条，每条可追问到实测数字）
+
+1. 三层自动化测试体系（API/UI/DB）—— PyTest + Playwright + Requests + POM，19 场景覆盖登录鉴权/PIM CRUD/混合闭环；API 层较 UI 快 3 倍、本地较公网快 ~11 倍（实测）
+2. 测试基础设施—— 数据工厂唯一命名（共享环境防污染）、fixture 三层 scope、参数化；用例数 +67% 总耗时持平（M2 实测）
+3. 失败定位体系—— 截图/Trace/netlog/api_log 四类留痕（失败落盘、成功零产物）+ Allure 报告四元素；故意注入失败实测全部真实生成
+4. CI 与 Docker 化—— GitHub Actions 分层 CI（API 先跑）+ Docker 化测试环境（compose 一套命令全量跑通）；flake 度量脚本量化公网稳定性（3/3 记录在案）
+
+### 三、项目介绍（三档）
+
+- **30s**：测试金字塔架构，API 主力 + UI 关键旅程 + DB 持久化校验；19 场景 18 通过 + 1 设计红；失败留痕 5 分钟定位；CI + Docker 化
+- **1min**：30s + 三个实测证据（API 快 3 倍→分层依据；公网过载→超时校准+单次重试+可观测计数；共享环境→数据工厂唯一化）
+- **3min**：1min + 排障故事（登录接口六轮证伪 / DB 硬删 vs 软删 / 断言 5s 盲区）+ 门禁事故故事（M6 审查代笔被作废 → 沉淀 §13.1 制度）
+
+### 四、八个高频面试问答（标准话术见对话记录，此处记答题结构）
+
+| Q | 主题 | 核心话术结构 |
+|---|---|---|
+| Q1 | Playwright vs Selenium | 等待机制(自动等待vs显式) → 定位器(用户视角vs XPath) → 工程能力(Trace/网络监听/会话复用) → 代价(浏览器下载镜像) |
+| Q2 | API 测试多于 UI？ | 稳定性(UI 渲染时序) + 断言精度(状态码≠业务正确) + 成本(3 倍/11 倍速差)；UI 不做减法只做关键旅程 |
+| Q3 | 数据管理与污染 | 工厂唯一命名 + 自建自清 + finally 幂等清理(容忍 200/404)；共享环境实测 3 分钟 +1 条记录 |
+| Q4 | flaky 排查与治理 | 度量(固定命令×N) → 归因(环境/数据/时序分类) → 治理(超时校准/语义等待) → 再度量(3/3) → 可观测(重试计数)；严禁无脑重试掩盖 |
+| Q5 | 断言 5s 盲区 | expect 默认 5s 不受 set_default_timeout 影响——操作层/断言层两套预算；收敛到 ASSERT_TIMEOUT_MS |
+| Q6 | DB 校验层价值 | 页面显示≠落库；硬删 vs 软删只有查库能区分（实测 API 删除后行物理消失）；最小权限只读账号 |
+| Q7 | Review 门禁故事 | M6 审查结论由实现方代笔 → 所有者作废 → §13.1 制度（独立提交/晚于实现/附自有数据/代笔即作废） |
+| Q8 | 项目不足 | CI 真实触发未跑(上仓闭环) / 镜像 2.72GB 偏大 / 覆盖率未统计(YAGNI) / requests 低频瞬态靠重跑判断 |
+
+### 待办（延续 Reviewer 收尾意见）
+
+1. M9 DoD：真实 GitHub Actions 跑绿一次（上仓后闭环，属 UNVERIFIED）
+2. M10 独立复审（E1–E6 不利条件证据已备，待独立方实跑确认）
+3. M11 面试演练：建议秋招前口头演练 30s/1min/3min 三档
