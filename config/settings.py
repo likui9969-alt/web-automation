@@ -18,6 +18,10 @@ PASSWORD = os.getenv("ORANGEHRM_PASSWORD", "admin123")
 # 2026-09-15 晚高峰实测：Demo 站过载时 goto 连 domcontentloaded 都 >10s，
 # 10s 预算不足 → 提到 20s（环境参数按实测校准，非放宽断言标准）。
 DEFAULT_TIMEOUT = int(os.getenv("ORANGEHRM_TIMEOUT", "20"))
+# 隐含预算（独立复审二轮 P1-2/P2-1）：goto 失败单次重试（pages/base.py）会把单个
+# open() 的最坏等待抬到 2×DEFAULT_TIMEOUT（=40s）。这是"吸收环境噪声"的有意代价，
+# 重试有模块级计数 + 会话结束输出（conftest pytest_terminal_summary）保证可观测；
+# 改 DEFAULT_TIMEOUT 时连带影响该上界。
 
 # 断言层预算（毫秒）——expect() 的 timeout 统一取值处（全面复审 P1-2 修复）。
 # 为什么单独存在：Playwright expect 默认 5s 且**不受** set_default_timeout 影响

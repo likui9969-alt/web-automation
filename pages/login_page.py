@@ -13,9 +13,10 @@ M3 后：3 个定位器定义集中在本文件，**前端改版只改这里，�
 """
 import re
 
-from playwright.sync_api import Page, TimeoutError, expect
+from playwright.sync_api import Page, expect
 
 from config import settings
+from pages.base import goto_with_retry
 
 
 class LoginPage:
@@ -31,15 +32,9 @@ class LoginPage:
     def open(self) -> "LoginPage":
         # wait_until="domcontentloaded"：SPA 只需 DOM 就绪即可交互，
         # 不必等全部图片/字体的 load 事件——公网高峰期 load 等待随机超时的
-        # 正确解法（改等待条件，不是无脑加大超时）
-        try:
-            self.page.goto(f"{settings.BASE_URL}{self.URL_PATH}", wait_until="domcontentloaded")
-        except TimeoutError:
-            # goto 单次重试（独立复审 P1-2 整改，2026-09-16 度量：Demo ui ×3 =
-            # 2 绿 1 红，失败全部在 setup 导航超时）。公网共享 Demo 的导航超时是
-            # 环境噪声而非断言问题——AGENTS §14 允许带记录的重试吸收环境噪声，
-            # 重试只到第二次、不改变任何断言与结论（区别于 M3 的阈值校准）。
-            self.page.goto(f"{settings.BASE_URL}{self.URL_PATH}", wait_until="domcontentloaded")
+        # 正确解法（改等待条件，不是无脑加大超时）。
+        # goto 单次重试的实现在 pages/base.py（P1-2 整改抽一处 + 计数可观测）
+        goto_with_retry(self.page, f"{settings.BASE_URL}{self.URL_PATH}")
         return self
 
     def login(self, username: str, password: str) -> None:

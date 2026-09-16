@@ -13,7 +13,7 @@
 | M3 POM | APPROVED | 2026-09-15 | pages/login_page.py 激活 POM：定位器 7→0 处散落、URL/操作语义收编、断言分层取舍有注释。**过程中遭遇真实 flaky**：公网过载致 goto 随机超时（同代码 5P 与 3P+2E 并存），经 wait_until=domcontentloaded + 超时 20s 校准双修复后稳定 5 passed。全程排障记录见验证记录（面试黄金素材） |
 | M4 API 层 | APPROVED | 2026-09-15 | **六轮探测证伪链**（表单无 token→JSON 405→UA 无效→Playwright 网络监听抓真相）：登录=Vue 壳 `<auth-login :token>` 提取 + POST /auth/validate；API 真实路径含 /web/index.php 前缀（M0 抓包漏记）。api/client.py + api/pim.py 语义封装，**API 层 5 passed in 14.34s（vs UI 同规模 43.24s，3 倍速差=金字塔实测证据）**。全量 10 passed in 65.40s；conftest setdefault 彻底修复浏览器路径依赖（M1 P2-1 终闭环）。**Review APPROVED_WITH_FIXES → P2-1（PIMApi base_url 一致性）修复后复跑 5 passed 16.57s → APPROVED 终态，M4 关闭** |
 | M5 UI+API 混合造数 | APPROVED | 2026-09-15 | 数据工厂（utils/factory.py 唯一命名）+ api/pim.py 增 create/delete/search_by_name（探测实证）+ conftest 会话复用（api_client session 级 + ui_auth_state cookie 注入，收编 M4 P3-1）+ pages/pim_page.py + tests/e2e/ 两条混合闭环用例。**过程中两次真实排障**：①Save 后竞态（前端先发 unique 校验再 POST，~2s 延迟）→ toast 语义等待修复；②全量暴露 expect 断言 5s 盲区（不受 set_default_timeout 影响）→ 断言超时校准。终态 **e2e 2 passed；全量 12 passed**（Builder 111.68s / Reviewer 104.26s 双绿）。**Review APPROVED_WITH_FIXES → P2-1（E2E-02 失败安全清理）修复后复跑 2 passed 31.83s + 残留核验 0 → APPROVED 终态，M5 关闭** |
-| M6 本地部署 + DB 校验 | NEEDS_FIX | 2026-09-16 | docker-compose 拉起 OrangeHRM 5.9 + MySQL 8.0；**发现 5.x 有配置驱动的无人值守安装器**（cli_install.php，console 版纯交互式；安装后自动删除含明文密码的 yaml）→ 171 表落库；utils/db_client.py（pymysql 只读、参数化、最小权限账号 ohrm_ro）+ tests/db/ 两条持久化校验 + conftest db_client 环境门控。**两次真实排障**：解释器错位 → 项目 venv；localhost cookie domain 陷阱 → domain 取 BASE_URL host。**状态变动（2026-09-16）：M6 独立复审判 NEEDS_FIX，所有者确认此前 M6 审查节由实现会话代笔 → 作废原 APPROVED（P1-3，数据真实不升级 P0）**。待解决：P1-1 门控假红（已修复待复审）、P1-2 公网 flake 度量（进行中）、P1-3 流程整改（已落 AGENTS §13.1）；P2-1~5 修复中。修复与独立复审均通过前禁止进入 M7 |
+| M6 本地部署 + DB 校验 | APPROVED_WITH_FIXES | 2026-09-16 | docker-compose 拉起 OrangeHRM 5.9 + MySQL 8.0；**发现 5.x 有配置驱动的无人值守安装器**（cli_install.php，console 版纯交互式；安装后自动删除含明文密码的 yaml）→ 171 表落库；utils/db_client.py（pymysql 只读、参数化、最小权限账号 ohrm_ro）+ tests/db/ 两条持久化校验 + conftest db_client 环境门控。**两次真实排障**：解释器错位 → 项目 venv；localhost cookie domain 陷阱 → domain 取 BASE_URL host。**状态历程**：第一轮独立复审 NEEDS_FIX（P1-1 门控假红 / P1-2 公网 flake / P1-3 门禁自证，原 APPROVED 因审查节代笔被所有者作废）→ Builder 全部整改 → **第二轮独立复审（2026-09-16）APPROVED_WITH_FIXES：P1 全清零（审查方实测 8 组），M6 关闭，M7 允许开工**。硬性闭环点：P2-1 重试可观测性（已闭环于本轮，见下）+ P2-2 度量机制化与 requests 层策略（M9 准入前）+ P2-3 分页/清理（已闭环于本轮） |
 
 ## 验证记录
 
@@ -33,7 +33,7 @@
 | 2026-09-15 | M1 | **第一批 UI 测试实际运行** | `pytest -m ui`：**3 passed in 35.29s，退出码 0**。用例：test_login_valid_credentials（断言跳转 /dashboard/index）、test_login_wrong_password（断言 "Invalid credentials" 可见 + URL 未跳转）、test_login_empty_fields（断言 2 处 "Required"）。等待策略全部基于 expect 自动轮询，无任何固定 sleep。35.29s/3 用例即"每用例自建浏览器"的代价，M2 fixture 重构的对照基线 |
 | 2026-09-15 | M1 | **Reviewer 独立复跑**（Review 环节） | Reviewer 亲自执行 `pytest -m ui`（非采信 Builder 自述）：**3 passed in 29.78s，退出码 0**。与 Builder 记录的 35.29s 均通过，~18% 时间差佐证"每用例自建浏览器 + 公网 Demo 站"固有波动，基线可信 |
 | 2026-09-15 | M1 | P2 修复（Review 后 Builder 执行） | P2-2：README 状态节更新为实测事实（3 passed 双次运行）；P2-1：README 快速开始补国内镜像 + `PLAYWRIGHT_BROWSERS_PATH` 前置条件（PowerShell 可复现步骤）。P1-1（git 安装 + init）待项目所有者配合，未完成，M1 维持 NEEDS_FIX |
-| 2026-09-15 | M1 | **P1 修复：git 仓库初始化 + 首次提交** | 实测发现：git 2.55.0 **早已装于 `D:\应用\git\Git`，仅未进 PATH**（winget 亦确认已安装，升级因 UAC 无人值守跳过，不影响使用）。`git init -b main` + 按名 add 15 项 + 首次提交 `c93f61e`，退出码 0，工作区干净（`.venv/`、`.playwright-browsers/`、`chromedriver.exe` 均被 .gitignore 正确排除；chromedriver 为 Selenium 时代残留已补 ignore）。M1 P1 闭环 → APPROVED |
+| 2026-09-15 | M1 | **P1 修复：git 仓库初始化 + 首次提交** | 实测发现：git 2.55.0 **早已装于 `D:\应用\git\Git`，仅未进 PATH**（winget 亦确认已安装，升级因 UAC 无人值守跳过，不影响使用）。`git init -b main` + 按名 add 19 项（审计索引复核口径：实际 19 个条目，非此前记录的 15）+ 首次提交 `c93f61e`，退出码 0，工作区干净（`.venv/`、`.playwright-browsers/`、`chromedriver.exe` 均被 .gitignore 正确排除；chromedriver 为 Selenium 时代残留已补 ignore）。M1 P1 闭环 → APPROVED |
 | 2026-09-15 | M2 | **Fixture 重构后实测（含 M1 基线对照）** | `pytest -m ui`：**5 passed in 36.32s，退出码 0**（正向 1 + 错误凭证参数化 3 + 空表单 1）。对照 M1：3 用例 35.29s（均摊 ~11.8s/例）→ 5 用例 36.32s（均摊 ~7.3s/例），**用例数 +67% 总时长持平，单例均摊降 ~38%**。诚实结论：大头仍是公网页面加载与网络往返，浏览器共享只省 ~2s/例——优化收益取决于瓶颈构成（面试点） |
 | 2026-09-15 | M2 | 参数化用例生效验证 | pytest 输出显示参数 ID 完整展开：`[Admin-wrongpass123]`、`[nosuchuser-admin123]`、`[nosuchuser-wrongpass123]` 三组独立执行且全部 PASSED——错误用户名场景（M0 实测防枚举：统一 Invalid credentials）首次进入自动化回归 |
 | 2026-09-15 | M2 | **Reviewer 独立复跑**（M2 Review 环节） | **5 passed in 45.82s，退出码 0**。第三次运行（35.29/36.32/45.82s 三跑区间），波动 +26% 再证：公网站点时间数据必须看多次运行区间，禁止单点结论 |
@@ -87,6 +87,11 @@
 | 2026-09-16 | M6 | **独立复审 P1-2：公网 flake 度量 → goto 治理 → 再度量** | 度量（治理前）：Demo ui ×3 = **2 passed + 1 error（5 errors，全部 setup 层 goto 导航超时，20s 预算耗尽）**。治理：LoginPage/PimPage.open() goto 捕获 TimeoutError 单次重试（AGENTS §14 合规注释：仅吸收环境噪声、不改变断言）。再度量：Demo ui ×3 = **3/3 passed（34.51s / 36.13s / 37.20s）**。附：Demo 全量另见 2 failed（API 层 requests ReadTimeout，网络瞬态，重跑 -m api 9 passed 证实非回归） |
 | 2026-09-16 | M6 | **整改后全量回归（本地）** | 项目 venv + 本地环境变量：**18 passed in 17.11s，退出码 0**（api 9 + ui 5 + e2e 2 + db 2）——含独立复审 P2-4（API 负向 4 条：LOGIN-07 大小写 / LOGIN-08 空格 / 422 / 404）与 P3-4（E2E teardown 校验），重建环境 + 全部整改后全绿 |
 | 2026-09-16 | M6 | **整改后全量回归（Demo）** | 全量：**14 passed + 2 skipped + 2 failed in 140.71s**——failed 均为 requests ReadTimeout（网络层，登录请求 20s 读超时），重跑 -m api 9 passed in 27.22s 证实为公网瞬态非代码回归（公网 flake 事实再次实证，记录在案） |
+| 2026-09-16 | M6 | **第二轮独立复审（修复验证）** | 审查方自有 8 组实跑：本地 18 passed 18.41s / 公网全量 16P+2S 87.90s / 门控验收三场景（好凭证 0.26s、坏凭证 0.22s skip）/ DB 直连核验（171 表、1 行、残留 0、ohrm_ro 1142）/ 插桩探针（goto 重试零触发；黑洞对照验证重试路径真实）。复核一/二轮全部整改闭合 → **APPROVED_WITH_FIXES（P1 清零），M6 关闭，M7 允许开工**；Review 原文零删改（diff +278/−0） |
+| 2026-09-16 | M6 | 二轮 P2-1 优化：goto 重试可观测化 | 重试逻辑从两个 open() 抽到 pages/base.py 唯一实现（DRY）+ 模块级计数 RETRY_COUNT，conftest 新增 pytest_terminal_summary 会话结束输出重试次数（计数>0 显式可见，区分"flaky 消失"与"被重试救回"）；settings.py 补"最坏等待 2×DEFAULT_TIMEOUT"隐含预算注释。验证：本地/公网多轮运行计数均为 0（重试未触发） |
+| 2026-09-16 | M6 | 二轮 P2-3 优化：分页竞态 + 清理校验 | `test_employees_pagination_limit` 改为语义断言（limit 返回条数受控 + total >= 返回条数，不再比较两次调用的 total——消除共享环境毫秒窗口他人造数导致的偶发假红）；`test_employees_list_structure` finally 清理加状态码校验（与 DB 用例标准对齐）。Demo api 9 passed 28.06s 实测 |
+| 2026-09-16 | M6 | 二轮 P3-2 优化：负对照固化为常驻用例 | tests/db/test_negative_control.py：故意写错期望 lastName + `xfail(strict=True)`——每次本地运行按设计红（xfailed）证明断言真实生效；若断言层失效用例"意外通过"则套件报 unexpected pass 报警，禁止删除掩盖。本地 -m db：**2 passed + 1 xfailed in 3.43s**；本地全量 **18 passed + 1 xfailed in 19.18s** |
+| 2026-09-16 | M6 | 二轮 P3-1/P3-5 优化：README 口径与自查 | README 重建节补「等效路径已验证，down -v 未实跑」口径说明（P3-1）；新增口令一致性自查命令（P3-5，.env ↔ cli_install_config 不一致会导致应用登录失败） |
 
 ## M1 自评总结（Builder）
 
@@ -191,3 +196,60 @@
 
 **NEEDS_FIX → 修复完成，等待独立复审判定**。按 AGENTS §13.1，M6 的最终 APPROVED 须由
 真正独立的审查（非本 Builder）重新出具；期间禁止进入 M7。
+
+---
+
+## Review 整改记录（二轮优化，2026-09-16）
+
+> 第二轮独立复审判定 **APPROVED_WITH_FIXES**（P1 全清零，M6 关闭，M7 允许开工）。
+> 本节为二轮 P2/P3 中有条件闭环项的优化记录。
+
+### Reviewer 提出的问题（摘录）
+
+- P2-1：goto 重试不可观测（无计数/日志）→ "3/3 通过"无法区分 flaky 消失 vs 被吸收；隐含最坏等待 2×20s 未注释（闭环点 M7）
+- P2-2：flake 度量机制化 + requests 层无策略 + CI 目标环境策略（闭环点 **M9 准入前**，硬性）
+- P2-3：分页双 total 竞态；API-04 清理不校验状态码（闭环点 M9 准入前）
+- P3-1：README 重建节措辞与事实出入（down -v 未实跑）
+- P3-2：负对照用后即删 → 无法复核
+- P3-5：口令一致性自查命令化
+- 口径：M1 首次提交 15 项 → 实际 19 条目
+
+### Builder 判断
+
+- P2-1：同意 → **已闭环（本轮提前做）**
+- P2-2：同意 → **登记为 M9 准入前硬性项**（本轮不实现：requests 层策略与 CI 目标环境属 M9 工程，不在轻量优化范围）
+- P2-3：同意 → **已闭环（本轮）**
+- P3-1：同意 → 已修正（README 口径说明）
+- P3-2：同意 → 已固化为常驻 xfail 用例（非一次性探针）
+- P3-5：同意 → README 加自查命令
+- 口径：同意 → MODULE_FEEDBACK M1 行更正为 19
+
+### 已执行修改
+
+1. `pages/base.py`（新）：goto 单次重试唯一实现 + `RETRY_COUNT` 模块级计数
+2. `pages/login_page.py` / `pages/pim_page.py`：open() 改为调用 `goto_with_retry`（去重）
+3. `conftest.py`：新增 `pytest_terminal_summary` 输出重试计数
+4. `config/settings.py`：补"最坏等待 2×DEFAULT_TIMEOUT"隐含预算注释
+5. `tests/api/test_pim_employees.py`：分页断言改语义断言（消除竞态）+ API-04 清理校验
+6. `tests/db/test_negative_control.py`（新）：负对照常驻用例（xfail strict canary）
+7. `README.md`：重建口径说明 + 口令一致性自查命令
+8. `MODULE_FEEDBACK.md`：M6 状态 APPROVED_WITH_FIXES、M1 口径 19、验证记录
+
+### 未执行建议
+
+- P2-2（度量机制化 / requests 层策略 / CI 目标环境声明）：**登记待 M9**（硬性准入门）
+- Playwright vs Selenium 选型理由：M1 起欠账，登记 M11 面试材料
+
+### 修改后的实际验证（2026-09-16 二轮优化）
+
+| 运行 | 结果 |
+|------|------|
+| 本地 -m db（含负对照） | 2 passed + 1 xfailed in 3.43s |
+| 本地全量 | **18 passed + 1 xfailed in 19.18s**（重试计数 0） |
+| Demo -m api（分页/清理改动后） | 9 passed in 28.06s |
+| Demo -m e2e | 2 passed in 24.20s |
+
+### 当前状态
+
+**APPROVED_WITH_FIXES（二轮独立复审出具）→ M6 关闭，M7 允许开工**。
+待办：P2-2 为 M9 准入硬性前置；P3-7（DB 覆盖 UI 路径）与 Playwright 选型理由登记后续模块。

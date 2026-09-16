@@ -92,7 +92,7 @@ python -m pytest              # 全量 18 条
 不设上述环境变量时默认跑公网 Demo（DB 用例自动 skip）。
 MySQL 经宿主机 13306 端口暴露，测试用只读账号 `ohrm_ro` 校验（仅 SELECT，实测 INSERT 被拒）。
 
-**从零重建（一次性破坏性操作，独立复审 P2-3 实测留痕）**：
+**从零重建（一次性破坏性操作，P2-3 实测留痕）**：
 compose 为 DB 预置了空库 `orangehrm` 与用户 `ohrm`，而安装器以
 `isExistingDatabase: n` 自建库——重建时先 DROP 预置对象保证语义一致，再走首次安装流程：
 
@@ -106,8 +106,21 @@ docker exec ohrm-db mysql -uroot -proot_password_local -e "DROP DATABASE IF EXIS
 # 4. 之后重复上面第 2-4 步（安装、建只读账号、切环境变量）
 ```
 
+> **实测口径（2026-09-16，独立复审二轮 P3-1）**：`down -v` 一步按所有者指示
+> **未实际执行**；其等效状态（空卷 + 空库）因 Docker Desktop 重启导致数据卷
+> 重新初始化而实际出现，重建流程（DROP → 安装 → 建账号 → 核验 171 表）随后
+> 全程实测通过。故本流程为「等效路径已验证，`down -v` 命令本身未实跑」。
+
 > 端口已按独立复审 P2-5 绑定 `127.0.0.1`（仅本机可访问）；口令默认值见
 > [docker/.env.example](docker/.env.example)，改口令时可复制为 `.env` 覆盖（已被 .gitignore 屏蔽）。
+>
+> **口令一致性自查（P3-5，改口令后必查）**：`.env`/`.env.example` 的口令必须与
+> `docker/cli_install_config.yaml` 一致（compose 只负责容器环境变量，安装器用 yaml 里的
+> 口令创建应用账号 —— 不一致则应用登录失败）：
+> ```powershell
+> Select-String -Path docker\.env.example -Pattern "PASSWORD"   # 期望值
+> Select-String -Path docker\cli_install_config.yaml -Pattern "Password:"  # 实际值
+> ```
 
 ## 被测系统硬约束（项目设计依据）
 

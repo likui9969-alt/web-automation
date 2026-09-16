@@ -29,6 +29,22 @@ from config import settings
 from pages.login_page import LoginPage
 
 
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """会话结束输出 goto 重试计数（独立复审二轮 P2-1：重试必须可观测）。
+
+    任何一次重试触发都会在这里显式出现——排障/审查时能区分
+    "flaky 消失"（计数 0）与"flaky 被重试救回"（计数 > 0），
+    "3/3 通过"不再无法验证。计数在 pages/base.RETRY_COUNT，随
+    每次 goto 失败重试累加。
+    """
+    from pages.base import RETRY_COUNT
+
+    if RETRY_COUNT:
+        lines = " · ".join(f"{url} retried x{n}" for url, n in RETRY_COUNT.items())
+        terminalreporter.write_sep(
+            "=", f"goto 重试（AGENTS §14 环境噪声吸收）: {lines}", yellow=True)
+
+
 @pytest.fixture(scope="session")
 def playwright():
     with sync_playwright() as p:
