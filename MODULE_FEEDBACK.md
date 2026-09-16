@@ -116,6 +116,9 @@
 | 2026-09-16 | M10 | **容器内分层实测（docker run 直连）** | 连 M6 被测系统（网络 docker_default、BASE_URL=http://ohrm-app、shm 1gb、TRACE_SNAPSHOTS=false）：api 9 passed 3.18s / ui 5 passed 6.03s / e2e 2 passed 4.12s / db 2 passed+1xfailed 1.15s |
 | 2026-09-16 | M10 | **容器内分层实测（compose run，README 命令）** | `docker compose -f docker/docker-compose.yml run --rm test -m X`：api 9 passed 2.31s / ui 5 passed 5.30s / e2e 2 passed 3.65s / db 2 passed+1xfailed 0.87s；**全量 18 passed + 1 xfailed in 10.21s**（healthcheck 依赖正常、口令默认值正确） |
 | 2026-09-16 | M10 | **留痕 volume 落宿主 + 零留痕验证** | 坏凭证注入跑容器内 API 层 → 失败用例 api_log JSON（含 ts+nodeid）**落宿主 reports/logs/**（volume ../reports:/app/reports 生效）；容器内成功用例 → 零产物（无「M7 失败留痕」汇总段）。探针产物已清理 |
+| 2026-09-16 | M7/M9 | **二次复审 P2-2 修复：elapsed_ms 恒 null** | 审查方实测 netlog 中 elapsed_ms 27/27 全 null（`Response` 无 `elapsed` 属性，代码恒走 else）。本机实测 `r.request.timing` 在 response 事件时未完整填充（responseEnd-requestStart 为负如 -359ms）也弃用。**最终方案**：request 事件用 `time.monotonic()` 记起点、response 事件算差值（全自维护）。实测 UI 失败 netlog：elapsed_ms 全部有值（391/234/234/281ms），0 null、0 负数 |
+| 2026-09-16 | M9 | **二次复审 P2-1 修复：flake_measure.sh 静默假失败** | 审查方实测脚本首次实跑 0/1 假失败（只探测 POSIX venv 路径→Windows 回退 python3 无 pytest）。修复：按序探测 `.venv/Scripts/python.exe` → `.venv/bin/python` → `python3` + pytest 预检硬失败（`-m pytest --version` 失败即 exit 2，绝不产出假 FAIL）。**真跑实测**：`bash scripts/flake_measure.sh -r 1 -m db` → **RUN 1/1 PASS，success rate 1/1**，summary 正确显示「2 passed, 16 deselected, 1 xfailed in 3.74s」 |
+| 2026-09-16 | M7/M9 | 二次复审 P2 修复后全量回归 | 本地全量 **18 passed + 1 xfailed in 20.42s**，reports 零留痕（logs/traces/screenshots 均空）——elapsed_ms 自维护计时与 netlog 结构改动未破坏任何用例 |
 
 ## M1 自评总结（Builder）
 

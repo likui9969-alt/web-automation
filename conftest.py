@@ -210,13 +210,36 @@ def _new_page_with_tracing(browser, **context_kwargs):
     # R-10（Review P3-1）：补 elapsed（耗时）与 content-type——只有 method/url/status
     # 时"5 分钟定位"偏薄（耗时定位慢响应、content-type 定位错误响应），Trace 里有
     # 但要解压翻找，netlog 直接给最常用字段。
-    page.on("request", lambda r: netlog.append({"type": "req", "method": r.method, "url": r.url}))
-    page.on("response", lambda r: netlog.append({
-        "type": "resp", "status": r.status, "url": r.url,
-        "elapsed_ms": r.elapsed if "elapsed" in dir(r) else None,
-        "content_type": r.headers.get("content-type", ""),
-    }))
+    _start_ts: dict[str, float] = {}  # url -> 请求发出时单调时钟（ms），response 事件算差值
+    page.on("request", lambda r: _start_ts.setdefault(r.url, _monotonic_ms()))
+    page.on("response", lambda r: netlog.append(_netlog_entry(r, _start_ts.pop(r.url, None))))
     return context, page, netlog
+
+
+def _monotonic_ms() -> float:
+    """单调时钟毫秒（用于算请求耗时，不受系统时间调整影响）。"""
+    import time
+
+    return time.monotonic() * 1000
+
+
+def _netlog_entry(r, start_ms) -> dict:
+    """响应日志条目（M7 R-10）。耗时 = response 事件时刻 - 该请求发出时刻。
+
+    二次复审 P2-2 实测抓到：Playwright Response **没有 elapsed 属性**（hasattr=False），
+    `r.elapsed if "elapsed" in dir(r) else None` 恒为 None——"补耗时"从未生效。
+    审查方曾建议改用 `r.request.timing`，本机实测该字典在 response 事件时未完整
+    填充（首请求 responseEnd-requestStart 为负，如 -359ms），不可用。改为在 request
+    事件用单调时钟记起点、response 事件算差值——全自维护，不依赖 Playwright 填充时机。
+    """
+    elapsed_ms = None
+    if start_ms is not None:
+        elapsed_ms = max(0, int(_monotonic_ms() - start_ms))  # 防御：时钟抖动不出负数
+    return {
+        "type": "resp", "status": r.status, "url": r.url,
+        "elapsed_ms": elapsed_ms,
+        "content_type": r.headers.get("content-type", ""),
+    }
 
 
 def _teardown_context(request, context):

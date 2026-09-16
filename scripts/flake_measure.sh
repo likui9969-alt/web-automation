@@ -28,11 +28,24 @@ while getopts "r:m:" opt; do
 done
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PY="$ROOT/.venv/bin/python"
-if [ ! -x "$PY" ]; then
-  # 无 venv 时退回系统 python（记录提示，不硬失败——Linux 下 venv 路径可能与文档略不同）
-  PY="python3"
-  echo "> 未找到项目 venv ($PY)，改用系统 python3（若浏览器版本错位请先创建 .venv）" >&2
+
+# 解释器探测（二次复审 P2-1 修复）：按顺序尝试 Windows venv → POSIX venv → 系统 python3，
+# 并**预检硬失败**。此前只探测 POSIX 路径：Windows 下 .venv/bin 不存在 → 回退 python3，
+# 而系统 python3 可能没有 pytest → 每次循环必然 exit 1 → 输出 0/N 假失败，
+# 比直接报错更危险（使用者会误读为公网可靠性崩了）。预检保证：解释器不可用就退出，
+# 绝不产出假 FAIL。
+PY=""
+for cand in "$ROOT/.venv/Scripts/python.exe" "$ROOT/.venv/bin/python" "python3"; do
+  if command -v "$cand" >/dev/null 2>&1; then
+    if "$cand" -m pytest --version >/dev/null 2>&1; then
+      PY="$cand"
+      break
+    fi
+  fi
+done
+if [ -z "$PY" ]; then
+  echo "解释器不可用（未找到带 pytest 的 python，请在项目 .venv 下运行）" >&2
+  exit 2
 fi
 
 echo "===== flake measure: marker=$MARKER runs=$RUNS $(date '+%Y-%m-%d %H:%M') ====="
