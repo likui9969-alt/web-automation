@@ -119,6 +119,7 @@
 | 2026-09-16 | M7/M9 | **二次复审 P2-2 修复：elapsed_ms 恒 null** | 审查方实测 netlog 中 elapsed_ms 27/27 全 null（`Response` 无 `elapsed` 属性，代码恒走 else）。本机实测 `r.request.timing` 在 response 事件时未完整填充（responseEnd-requestStart 为负如 -359ms）也弃用。**最终方案**：request 事件用 `time.monotonic()` 记起点、response 事件算差值（全自维护）。实测 UI 失败 netlog：elapsed_ms 全部有值（391/234/234/281ms），0 null、0 负数 |
 | 2026-09-16 | M9 | **二次复审 P2-1 修复：flake_measure.sh 静默假失败** | 审查方实测脚本首次实跑 0/1 假失败（只探测 POSIX venv 路径→Windows 回退 python3 无 pytest）。修复：按序探测 `.venv/Scripts/python.exe` → `.venv/bin/python` → `python3` + pytest 预检硬失败（`-m pytest --version` 失败即 exit 2，绝不产出假 FAIL）。**真跑实测**：`bash scripts/flake_measure.sh -r 1 -m db` → **RUN 1/1 PASS，success rate 1/1**，summary 正确显示「2 passed, 16 deselected, 1 xfailed in 3.74s」 |
 | 2026-09-16 | M7/M9 | 二次复审 P2 修复后全量回归 | 本地全量 **18 passed + 1 xfailed in 20.42s**，reports 零留痕（logs/traces/screenshots 均空）——elapsed_ms 自维护计时与 netlog 结构改动未破坏任何用例 |
+| 2026-09-16 | M10 | **容器内不利条件验证（M10 独立复审前置，E1–E6）** | 重建镜像（compose build，打入 492cb5e 前的最新 conftest）。**E1 基线**：容器内全量 18 passed + 1 xfailed in 13.15s。**E2 坏凭证 API 失败**：api_log 全部落宿主（含 ts+nodeid 可过滤，2332b）。**E3 CWD=/tmp + rootdir=/app**：4 errors 全为坏凭证导致的 fixture setup 断言失败（"前置登录失败"），**零 FileNotFoundError/netlog 写入错误**——P2-1 CWD 兜底容器内成立；留痕汇总正常、api_log 落盘不受 CWD 影响（REPORTS_DIR 绝对路径）。**E4 坏凭证 UI 失败（TRACE_SNAPSHOTS=false）**：四件套落宿主（截图 53KB/Trace 1MB/netlog 4KB），**netlog elapsed_ms 27/27 有值、0 null、0 负数**（对照修复前 27/27 null）。**E5 db 门控**：2 passed + 1 xfailed 非 skip——`ohrm-app` 被正确识别为本地。**E6 成功零留痕**：ui 5 passed 后产物目录 Count=0 |
 
 ## M1 自评总结（Builder）
 
