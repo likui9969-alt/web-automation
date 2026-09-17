@@ -16,14 +16,15 @@
 #   步骤：起被测系统（含首次无人值守安装）→ 建 ohrm_ro 只读账号 →
 #   build 测试镜像 → 分层在容器内跑 → 上传报告/留痕。
 #
-#   ⚠️ 诚实声明（UNVERIFIED）：容器路径**已在真实 runner 触发过，但尚未跑绿**。
-#   2026-09-17 首次真实触发（push 触发，run 35174500668 / 35174365514）→ 失败：
-#   第一步「起被测系统」即红（exit code 3，耗时 76s），安装/只读账号/构建步骤被
-#   跳过，UI 与 e2e 连锁红，两份 artifact 均空。**根因未确认**——GitHub 日志下载
-#   需仓库 admin 权限（API 返回 403），本地 Docker daemon 未运行无法复现，故本轮
-#   结论保持 UNVERIFIED，不猜原因。已按**可证明缺陷**整改四处（显式限定 up 服务、
-#   补 README 要求的 DROP 步骤、起服务失败导出 compose 日志让下次失败自证、
-#   层执行门控 up 成功）。跑绿之前，任何简历/面试材料不得宣称"CI 已跑通"。
+#   ⚠️ 诚实声明（UNVERIFIED）：容器路径**已真实触发 3 次，尚未跑绿**。
+#   ① 2026-09-17 首两次触发（run 35174500668 / 35174365514）→ 第 1 步「起被测系统」
+#      即红（exit 3 / 76s）：根因 = `up` 未限定服务，连带构建并启动 test 容器，
+#      `--wait` 因该一次性容器退出判失败。**已修复并实测通过（28s）。**
+#   ② 同日第 3 次触发（run 35195498493）→ 起服务/DROP/安装/只读账号/构建镜像全部通过
+#      （构建 37s），但三层测试各 1~2 秒失败、**exit 3**、artifact 全空 →
+#      定性为 pytest 启动阶段 INTERNALERROR，指向容器内无法写 reports/（uid 1000 vs
+#      runner 1001）。**已按此整改并加自证探针，尚未真跑验证。**
+#   跑绿之前，任何简历/面试材料不得宣称"CI 已跑通"。
 #
 # 国内网络说明：GitHub runner 在海外，playwright CDN / pip / docker hub 均可达
 #   （M10 镜像构建在本地已实测网络可拉取），不需要 npmmirror 镜像。
@@ -93,6 +94,30 @@ jobs:
 
       - name: 构建测试镜像（M10 Dockerfile）
         run: docker compose -f docker/docker-compose.yml build test
+
+      # 2026-09-17 第二次真实触发实测（run 35195498493）：三层测试各 1~2 秒失败、
+      # **exit code 3**、两份 artifact 全空。exit 3 = pytest INTERNALERROR（不是测试
+      # 失败），说明 pytest 在**启动阶段**就崩了——1~2 秒且零产物，连 collect 都没到。
+      # 启动阶段唯一会写磁盘的是 reports/：
+      #   - pytest.ini `--alluredir=reports/allure-results`（allure 插件 configure 建目录）
+      #   - conftest `pytest_configure` 建 screenshots / traces / logs
+      # 而 M10 镜像 `USER tester`（uid 1000），runner 上 reports/ 属 runner（uid 1001，
+      # 755）→ 容器内非 root 用户无法写该 bind mount → configure 钩子抛 PermissionError
+      # → INTERNALERROR。本机已实测该签名：configure 抛 PermissionError → 退出码 3。
+      # 为何本地没暴露：Docker Desktop（Windows）bind mount 不校验 Linux uid →
+      # M10「容器内 18 passed」只证明了 Windows 行为，**未覆盖 Linux**。
+      - name: 留痕目录授权（否则容器内非 root 用户无法写 → pytest 启动即 INTERNALERROR）
+        run: |
+          mkdir -p reports
+          chmod -R a+rwX reports
+          ls -ld reports
+
+      # 让"修复是否真生效"自证：用容器内同一个非 root 用户去写该目录。
+      # 探针失败会给出明确原因，避免下游三层再各报一次难解的 exit 3。
+      - name: 校验留痕目录在容器内可写（探针）
+        run: |
+          docker compose -f docker/docker-compose.yml run --rm --entrypoint sh test -c \
+            'touch /app/reports/.write_probe && rm /app/reports/.write_probe && echo "reports 容器内可写 OK"'
 
       # 分层容器内执行（M9 设计）：API 快先反馈；任一层红 → pipeline 红。
       # if: always() 保证 API 红也在本轮拿到 UI/e2e 结果（Review P2-3）：
