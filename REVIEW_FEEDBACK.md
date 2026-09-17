@@ -1371,8 +1371,8 @@ P1 已清零，**无阻塞项**。以下为 M7/M9 准入条件：
       python -m playwright install --with-deps chromium
   ```
 - **三条事实**：
-  1. **bash 双引号内 `~` 不展开**（本机实测：`echo "PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright"` 原样输出 `~`；写成 `$HOME` 才展开为 `/c/Users/.../.cache/ms-playwright`）→ 写入 `GITHUB_ENV` 的是**字面 `~`**
-  2. **Playwright 不展开 `~`**（本机实测：以 `PLAYWRIGHT_BROWSERS_PATH='~/.cache/ms-playwright'` 启动，报错路径为 `D:\fileprogram\测试\web-automation\~\.cache\ms-playwright\chromium_headless_shell-1234\...` —— `~` 被当成普通目录名，相对 CWD 解析）
+  1. **bash 双引号内 `~` 不展开**（本机实测：`echo "PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright"` 原样输出 `~`；写成 `$HOME` 才展开为真实主目录路径）→ 写入 `GITHUB_ENV` 的是**字面 `~`**
+  2. **Playwright 不展开 `~`**（本机实测：以 `PLAYWRIGHT_BROWSERS_PATH='~/.cache/ms-playwright'` 启动，报错路径形如 `<项目根>\~\.cache\ms-playwright\chromium_headless_shell-1234\...` —— `~` 被当成普通目录名，相对 CWD 解析）
   3. `GITHUB_ENV` 的写入**对当前步不生效**（GitHub 行为，仅后续步可见）→ 安装步执行时该变量**未设置** → Chromium 装到 Playwright 默认位置（Linux 上即 `$HOME/.cache/ms-playwright`）
 - **推论**：后续 UI/e2e 步拿到的值是字面 `~/.cache/ms-playwright`，Playwright 会相对工作目录解析成 `/home/runner/work/<repo>/<repo>/~/.cache/ms-playwright` → **找不到浏览器 → UI 与 e2e 全部 error**。而且 conftest 的 `setdefault` 此时不会兜底（变量已被显式设置）。
 - **不确定性声明（必须明说）**：事实 1、2 我在本机实测；事实 3 依据 GitHub 文档行为，**我无法在本机验证**。因此本条的判定有两个分支：
@@ -1450,3 +1450,341 @@ P1 已清零，**无阻塞项**。以下为 M7/M9 准入条件：
 
 本轮三个模块连做，最大的风险不是某一处代码，而是**"验证取样偏向容易通过的路径"这个模式已连续出现在 M6（门控只测顺利路径）、M7（三类失败样本全是浏览器层）、M9（浏览器路径只在 YAML 里改、没在 runner 上验证过）**。建议在 AGENTS 里加一条硬规定：
 **任何"环境/路径/门控/留痕"类改动，必须构造至少一个"不利条件"用例（依赖不可达、凭证失效、CWD 不同、跨层失败）才能宣称闭环。** 本轮 P1-1、P2-1 都是这条规则能直接拦下来的问题。
+
+---
+---
+
+# M7–M9 二次复审（整改验证，2026-09-16）
+
+> 审查对象：提交 `6416982`（M7-M9 整改）。审查期间工作区先为未提交 WIP、后被提交，已核对**被审文件与 HEAD 一致**（`git status` 仅剩 M10 的 docker 文件），故本节结论可绑定到 `6416982`。
+> 方法：独立实跑 9 组（跨层失败 / 绿跑 / 跳过语义 / CWD 异常 / 日志内容 / 度量脚本首跑），全部由审查方执行。
+
+## 1. 独立复跑证据
+
+| # | 实验 | 结果 |
+|---|---|---|
+| E1 | 本地全量（绿） | **18 passed + 1 xfailed in 25.28s**；`reports/` **零产物**（含 2 skip + 1 xfail，未被误记）✓ |
+| E2 | `-m api` + 坏凭证 | 6 个失败用例**全部产出 `api_log`**，并逐条列出 `screenshot (跳过: no page fixture (API/DB 层))` / `trace-netlog (跳过: no browser context)` ✓ |
+| E3 | 黑洞 URL（setup 阶段失败） | trace + netlog 照常产出；截图项**显式打印跳过原因** `setup 阶段失败，不截图 (M8 边界)` ✓ |
+| E4 | CWD = 系统临时目录 + 项目内 `pytest.ini` | **`1 failed`（不再出现额外 teardown error）**，产物正常写入项目 `reports/` ✓ |
+| E5 | 检查 `api_log` 内容 | 每条含 `ts`（毫秒）+ `nodeid`（当前用例）✓ |
+| E6 | 检查 netlog 内容 | `content_type` 有效 ✓；**`elapsed_ms` 27/27 全为 `null`** ✗（见 P2-2） |
+| E7 | `bash scripts/flake_measure.sh -r 1 -m api` | **RUN 1/1 FAIL (exit=1)、summary 为空、success rate 0/1** ✗（见 P2-1） |
+| E8 | Playwright API 探针 | `hasattr(Response,'elapsed') = False`；`Response.request.timing` 返回完整 timing 字典（可作修法） |
+| E9 | `heitage` 检查 | 一次本地全量 `exit=1` **未能复现**（其后连续全绿），且 `reports/` 零产物 → 无失败证据，标 **UNVERIFIED**，不计为问题 |
+
+## 2. 闭环核验（逐项）
+
+| 编号 | 上一轮问题 | 闭环证据（审查方实测） | 判定 |
+|---|---|---|---|
+| **M7 P1-1** | 纯 API/DB 层失败零留痕 | 收口到 `pytest_runtest_makereport`；E2 实测 API 层 6 用例全部落 `api_log`，并明确标注 browser 类产物为何缺失 | ✅ **闭环** |
+| **M7 P2-1** | netlog 无兜底 + 相对/绝对路径打架 | `pytest_configure` 改用 `REPORTS_DIR` 绝对路径；netlog 写入加 `try/except`；`append` 前置到写文件之前。E4 实测 CWD 在系统临时目录下仍为 `1 failed`，无额外 error | ✅ **闭环** |
+| **M7 P2-2** | api_log 无关联键 | E5 实测条目含 `ts` + `nodeid`，可按用例过滤 | ✅ **闭环** |
+| **M7 P2-3** | goto 失败截图静默缺失 | E3 实测汇总显式输出跳过原因，不再是"悄悄没有" | ✅ **闭环** |
+| **M9 P0** | 浏览器路径 `~` 不展开 → CI UI/e2e 必挂 | 按建议做了**代码级 + 文件级双保险**：`conftest` 改为"仅当项目内 `.playwright-browsers` 存在时才 setdefault"+ workflow 改用 `$HOME`。E1 本地全绿证明项目内路径未回退 | ✅ **闭环**（真实 runner 仍 UNVERIFIED） |
+| **M9 P2-1** | CI 不覆盖 DB 层却未声明 | README 新增「DB 层在 CI 中的覆盖范围（M9 Review P2-1 显式声明）」节，写明只跑 api/ui/e2e、不跑 db | ✅ **闭环** |
+| **M9 P2-3** | 前层失败吃掉后续层信息 | UI/e2e 步加 `if: always()` | ✅ **闭环** |
+| **M9 P2-2** | 度量脚本 Windows-only | 补 `scripts/flake_measure.sh`；**但仅做了 `bash -n` 语法检查，首次实跑即失败** | ⚠️ **部分闭环 → 新增 P2-1** |
+| **M9 P3-3** | 无 concurrency | 已加 `concurrency: {group: ref, cancel-in-progress: true}` | ✅ 闭环 |
+| **跨模块 P1-C** | 工作区 ≠ 提交态、探针污染 | `tests/` 现仅 5 个真实用例文件（探针已删）；根目录 4 个 `_m10_diag*.py` 与 `_ui_err.txt` 已清理 | ✅ **部分闭环 → 新增 P2-3** |
+| 额外（自发现） | skip/xfail 误记留痕 | 报"3 skipped 全被误记"并过滤 `pytest.skip/xfail.Exception` + xfail marker；E1 绿跑零产物验证 | ✅ **主动修复，予以记录** |
+
+## 3. 新增 P2
+
+### P2-1：`flake_measure.sh` 首次实跑即**静默假失败**（且只做过语法检查）
+- **实测**（E7）：`bash scripts/flake_measure.sh -r 1 -m api` → `> 未找到项目 venv (python3)，改用系统 python3` → `RUN 1/1: FAIL (exit=1)` → `last summary:`（空）→ `success rate: 0/1, failures: 1`
+- **根因**：脚本硬编码 POSIX venv 路径 `.venv/bin/python`；Windows 下 venv 在 `.venv/Scripts/python.exe` → 落回 `python3`，而本机 `python3` 指向**与该 venv 无关的另一套解释器**（实测 `No module named pytest`）→ 每次循环必然 exit 1。
+- **影响**：① 这个脚本的存在意义是"回答当前 flake 率是多少"，而它给出的是 **0/1 的假失败** —— 使用者会误读为"公网可靠性崩了"，比直接报错危险得多；② 回退分支**恰好重演 M6 已记录的坑**（"系统 python 可能是共享 venv"——脚本自己的头部注释就写着这条）；③ MODULE_FEEDBACK 只登记了 `bash -n exit=0`，即**从未真正执行过**，而 ps1 版是真跑过的（3/3）。这与前几轮的"取样偏容易路径"是同一模式：跨平台交付只验证了容易验证的那一半。
+- **修复建议**：解释器探测改为按顺序尝试 `.venv/Scripts/python.exe` → `.venv/bin/python` → `python3`，并**加预检硬失败**：`"$PY" -m pytest --version >/dev/null 2>&1 || { echo "解释器不可用: $PY"; exit 2; }`（不可用就退出，绝不产出假 FAIL）。修完请**真跑一次**并在 MODULE_FEEDBACK 记录输出。
+
+### P2-2：`elapsed_ms` 恒为 `null` —— 宣称的"补齐耗时"没有生效
+- **实测**（E6）：我自己那次 UI 失败的 netlog 里 **27/27 条 `elapsed_ms: null`**；对照 `content_type` 正常工作（同一次改动里一半生效一半不生效）。
+- **根因**（E8 探针）：Playwright 的 `Response` **没有 `elapsed` 属性**（`hasattr` 为 False），而代码写的是 `r.elapsed if "elapsed" in dir(r) else None` → 条件恒假 → 永远写 `None`。取证路径：`Response.request.timing` 实测返回完整字典（`startTime/connectStart/requestStart/responseStart/responseEnd/...`）。
+- **影响**：这是"看起来改了但没生效"的典型——产物里多了一个恒 `null` 的字段，读者会以为"这条请求没测到耗时"，实际是这个字段从未实现。而它被写进提交说明（`R-10 补耗时`），构成**未经实际验证的声明**。
+- **修复建议**：改用 `r.request.timing`，例如 `elapsed_ms = int(timing["responseEnd"] - timing["requestStart"])`（或 `responseEnd - startTime` 表示整段耗时），并对 `timing` 缺失做保守兜底；改完至少跑一次 UI 失败并**打开 netlog 确认字段非 null**。
+
+### P2-3：一条提交跨三个模块（M7 修复 + M9 修复 + **M10 行为改动**）
+- **事实**：`6416982` 同时改了 `conftest.py` / `.github/workflows/test.yml`（M7/M9 整改），**并包含 M10 的行为改动**——`db_client` 门控白名单新增 `ohrm-app`、新增 `ORANGEHRM_TRACE_SNAPSHOTS` 开关（Trace snapshots 在容器内会触发 `TargetClosedError`）。而 README 说明这些是"容器内（M10 实测）"的结论。
+- **影响**：① 审查者无法把"M7 的修复效果"与"M10 的新行为"分开评估——例如 trace snapshots 开关本身就改变了留痕产物的内容（DOM 快照可能缺失），却混在 M7 的整改里；② 我上一轮提的 P1-C 只解决了"脏工作区"，**未解决"一条提交跨模块"**；③ M10 的行为已经进入不可改的历史，而 M10 尚未通过任何门禁（累计第 4 次顺序问题）。
+- **修复建议**：M10 收尾时**独立提交**，并在 MODULE_FEEDBACK 里注明"M10 行为改动曾随 M7-M9 整改提交进入历史（commit 6416982）"，避免后续审查者把容器相关行为误当 M7 的能力。
+
+## 4. 新增 P3
+
+1. **setup 阶段一律不截图**：取舍有实测依据（导航失败后 `page.screenshot` 会等 fonts 超时），但"导航失败"恰是最想看页面的一类。可选改进：setup 失败时用 `timeout=2000` 试截一次，失败则保持现状——成本 2s，收益是这类失败也能有像素证据。
+2. **`paths["skipped"]` 混进产物字典**：终端汇总要靠 `kind == "skipped"` 特判跳过，结构语义混杂；建议改为返回 `(paths, skipped)` 两个对象，任何未来消费者都不会误把它当路径。
+3. **session 级请求的 nodeid 归属**：`api_client`/`ui_auth_state` 的登录请求发生在"第一个用到它的用例"的 setup 期间，于是日志里会出现"某用例名下有一条它并不需要的登录请求"。建议对 session 级请求标 `nodeid: "<session fixture>"`。
+4. **teardown 阶段失败不留痕**：`makereport` 只收 setup/call。用例体内的清理断言属 call 阶段（已覆盖），但 **fixture 自身 teardown 抛错**仍无现场；建议把 teardown 也纳入（至少落 `api_log`）。
+5. `make_artifact_paths` 返回值末行缺换行（`\ No newline at end of file`），非问题，顺手记录。
+
+## 5. 各模块结论
+
+| 模块 | 判定 | 说明 |
+|---|---|---|
+| **M6**（遗留 P2） | ✅ 全部闭环 | P2-1 重试可观测（实测 `retried x4`）、P2-2 机制+CI 策略+DB 覆盖声明、P2-3 语义断言与三处清理校验；P3-2 负对照解法优于建议 |
+| **M7** 失败定位 | **APPROVED_WITH_FIXES** | P1 清零（跨层留痕已实测覆盖 API/DB）；P2-2（`elapsed_ms` 恒 null）属本模块产物质量，需修 |
+| **M8** Allure | **APPROVED** | 继承问题已通过"显式声明跳过原因"消解——无浏览器层不出截图是合理边界，且现在**明说**了；attachment 链路实测有效 |
+| **M9** CI | **APPROVED_WITH_FIXES** | P0 清零（路径做了代码级+文件级双保险）；P2-1（`flake_measure.sh` 假失败）需修；**真实 Actions 触发仍 UNVERIFIED，M9 的 DoD 未完成** |
+| **M10** 容器化 | 未提交，**不得据此宣称任何结论** | 行为改动已混入 `6416982`（见 P2-3） |
+
+## 6. 门禁总账更新
+
+| # | 模块 | 问题 | 状态 |
+|---|---|---|---|
+| 7 | M7 | 纯 API/DB 层零留痕 | ✅ **闭环**（E2 实测） |
+| 8 | M7–M9 | 工作区 ≠ 提交态 / 探针污染 | ✅ **闭环**（tests/ 已净、根目录残留已清）；⚠️ 但"一条提交跨模块"未解决 → 新增 P2-3 |
+| 9 | M9 | CI 浏览器路径 P0 | ✅ **闭环**（代码级+文件级） |
+| 10 | M9 | `flake_measure.sh` 静默假失败（首次实跑 exit=1、0/1） | ❌ **新增 P2** |
+| 11 | M7 | `elapsed_ms` 恒 null（宣称的 R-10 未生效） | ❌ **新增 P2** |
+
+## 7. 一句话
+
+**上一轮的两个 P1 与一个 P0 都被真正修掉了，而且修法比我建议的更彻底**（留痕从"fixture 触发"改成"钩子收口"覆盖全 4 层；浏览器路径做代码级+文件级双保险；还主动发现并修掉了 skip/xfail 误记——这是他们自己找出来的）。**唯一没跟上的是"跨平台交付只验证了一半"**：ps1 真跑了 3/3，`.sh` 只做了 `bash -n`，首次实跑就是 0/1 的假失败；同一个提交里 `elapsed_ms` 也是"写了但没生效"。这两处都不影响架构，但都属于**声明与事实之间的距离**——而这正是本项目最在意的那件事。
+
+**门禁状态：M6/M8 APPROVED；M7/M9 APPROVED_WITH_FIXES（各 1 条 P2 待修）；M10 可开工但必须独立提交。**
+**M9 的 DoD（push 实际触发）仍未完成 —— 在真实 GitHub Actions 跑绿一次之前，M9 不应被记为"已交付"。**
+
+---
+
+# 补记（2026-09-16）：二次复审两条 P2 的修复验证
+
+> 本节针对上文 §3 的 P2-1 / P2-2，由审查方在提交 `492cb5e`（`M7/M9 二次复审P2闭环`）上**独立复跑**确认。
+> 同时更正上文 §5 的一处状态：**M10 已于 `e02d6a2` 独立提交**（"测试执行环境容器化——Dockerfile + compose test 服务，容器内全量 18 passed"），故上文"未提交"的表述已过期；但"M10 行为改动曾混入 `6416982`"这一事实不变，P2-3 仍成立。
+
+## V1：`flake_measure.sh` 静默假失败 → ✅ 已修
+
+- **复跑命令**：`bash scripts/flake_measure.sh -r 1 -m api`
+- **结果**：`RUN 1/1: PASS (exit=0)`；`last summary: ====================== 9 passed, 10 deselected in 33.96s ======================`；`success rate: 1/1, failures: 0`
+- **判定**：上次的 `0/1 假失败`（解释器回退到无 pytest 的 `python3`）已消除；解释器预检生效，且不再产出误导性结论。**闭环** ✓
+- 备注：本次跑的是公网 Demo 默认环境，`9 passed` 与 M9 记录的 api 层一致。
+
+## V2：`elapsed_ms` 恒 `null` → ✅ 已修（并核验了 `0ms` 的语义）
+
+- **复跑方式**：本地 UI 用例 + 错误凭证制造失败 → 检查新生成的 netlog
+- **结果**：字段不再恒 null，实测取值分布 `0ms ×12`、`31/31/31/31ms`、`62/63/63ms`、`171/187/203/250/312/407ms`
+- **对 `0ms` 的进一步核验（避免"改了但还是假值"）**：把 12 条 `0ms` 响应按 `content-type` 拆开 —— 全部是静态资源（svg×2 / css×2 / js×2 / woff2×4 / png×2），而**同类资源在另一次加载中分别为 31ms（woff2）、171~187ms（css）、250~312ms（js）**。同一资源两次加载出现"毫秒级 vs 0ms"的对照，判定为**浏览器缓存命中**，而非计时失效。
+- **判定**：`elapsed_ms` 已真实可用；修法（自维护单调计时）与我建议的 `request.timing` 不同但合理——不依赖 Playwright 版本是否暴露 `timing`。**闭环** ✓
+
+## 补记后的门禁状态
+
+| 模块 | 状态 | 备注 |
+|---|---|---|
+| M6 | APPROVED | — |
+| M7 | **APPROVED** | P1 与 P2 均已实测闭环 |
+| M8 | APPROVED | — |
+| M9 | **APPROVED_WITH_FIXES** | 代码/配置层面 P0+P2 全闭合；**唯一剩余项是它自己的 DoD：真实 GitHub Actions 跑绿一次**（`act` 本地跑不通，属 UNVERIFIED） |
+| M10 | 已提交（`e02d6a2`），**尚未审查** | 独立提交 ✓（P2-3 的提交边界问题在 M10 上未重演）；容器内自述 18 passed，需独立复审 |
+
+### 审查者收尾意见
+
+三次迭代下来，这个项目已经形成了很罕见的工作节奏：**审查发现问题 → 下一次提交专门解决它 → 审查方再实测确认**。本轮 P1-1 的修法（留痕从 fixture 触发改为 hooks 收口）、M9 P0 的双保险、以及 P2-1/P2-2 的两条修复，都不是"为了过审"的敷衍改法。
+
+还剩两件事没做，都指向同一个方向——**把"声明"变成"证据"**：
+1. 真实 GitHub Actions 跑绿一次（M9 的 DoD，也是整个 QA 故事落地的最后一块）
+2. M10 的独立复审（容器内 18 passed 是自述，需要按本轮同样的方式构造不利条件验证：CWD、门控、留痕在容器内的行为）
+
+作为 Reviewer，我对当前状态的意见是：**可以进入 M10 审查与 M11 复盘，但简历/面试材料里不要把 CI 写成"已跑通"，只能写"workflow 已就绪（本地 act 未通、真实触发待上仓）"** —— 这条边界必须自己守住，面试官一问"CI 跑过几次"就能验证。
+
+---
+---
+
+# 全局收口审查：M10–M11 + 项目可投递性（2026-09-16）
+
+> 触发：所有者称"全部模块已经完成，审查"。
+> 本次审查对象：提交 `eada115`（M11 交付物）+ `d90d864`（M10 E1–E6 不利条件验证）+ 全项目收口状态。
+> **环境限制（必须声明）**：审查期间 Docker daemon 未运行（`failed to connect to docker API`），故**本地环境与容器内的一切数字本轮无法独立复验**；公网环境可测但受审查机代理影响（见 §2）。
+
+## 1. 结论先行
+
+**"实现"基本齐全，"收口"没有完成。** 三个 P0 从 7 小时前的评估起**一字未动**，且 M11 把我在 M6 二轮复审中明确否掉的量化口径**重新写了回来**，并准备写进简历。
+
+| 模块 | 状态表当前值 | 审查方判定 | 差异原因 |
+|---|---|---|---|
+| M7 | NEEDS_FIX | **APPROVED** | 状态表未按二轮复审结论更新（P1 已实测闭环） |
+| M8 | APPROVED_WITH_FIXES | **APPROVED** | 同上 |
+| M9 | NEEDS_FIX | **APPROVED_WITH_FIXES** | 同上（仅剩它自己的 DoD：真实触发） |
+| M10 | IN_PROGRESS → WAITING_FOR_REVIEW | **未能审查（环境不可用）** | Docker daemon down，容器内结论无法复验 |
+| M11 | IN_PROGRESS → WAITING_FOR_REVIEW | **NEEDS_FIX** | 见 §3 |
+
+**⇒ 不能宣称"全部完成"。** 状态表自身与审查结论矛盾，README 还停在 M6 —— 对一个把"只记录实测事实"当卖点的项目，这是最贵的失分。
+
+## 2. 本轮实测数据（含一条重要归因）
+
+| # | 场景 | 结果 | 归因 |
+|---|---|---|---|
+| A | 本地环境全量 | **API 层 5 failed + 4 errors（`requests.exceptions.ConnectionError`，`[WinError 10061] 目标计算机积极拒绝`）** | **环境**：Docker Desktop 已停止，`localhost:8080` 无监听 → 本地模式强依赖容器运行，非代码缺陷 |
+| B | 公网默认环境全量 | **5 failed + 11 errors + 3 skipped in 251.31s** | **环境**（审查机代理）——见下 |
+| C | 失败类型分布 | `requests.exceptions.ProxyError` ×11、`playwright TimeoutError` ×5 | 代理相关 |
+| D | 代理连通性探针 | `HTTPS_PROXY=http://127.0.0.1:7897/`；经代理 `http_code=000`（不可达）；**直连 `302`（可达）** | 代理进程未运行 |
+
+**⇒ B 轮全红不是项目缺陷**，是审查机代理未启动、而 `requests`/Chromium 遵循了 `HTTP(S)_PROXY` 环境变量。**但这条恰恰暴露了一个真问题（P1-3），见下。**
+
+## 3. P1 — 必须修改（3 条）
+
+### P1-1：M11 把已被否掉的「11 倍速差」写回了简历与面试话术
+
+- **事实**：M11 数据统计写"本地 vs 公网 **~11 倍速差**（9.49s vs 104~112s）"，**简历 bullet 1** 写"本地较公网快 **~11 倍**（实测）"，**Q2 话术**亦引用"3 倍/11 倍速差"。
+- **为什么这是问题**：这个口径在 **M6 二轮复审 P3-6 已被明确否决**，理由当时写得很具体：**分子取公网最慢一次、分母取本地最快一次，且两侧用例集不同**；我给出的同口径实测是 **~7.7 倍（公网 12 条 107.27s vs 本地 14 条 13.96s）**，跨运行区间 4.4~8.8 倍。Builder 当时已把 README 改成"约 4~9 倍并注明用例集差异"——**8 小时后 M11 又把它改回 11 倍**。
+- **影响**：简历第一条 bullet 就带这个数字，面试官一句"这 11 倍怎么算的、你拿哪两个数比的"即可击穿。这是本项目"数据必须有真实出处"原则的自我违反。
+- **修复**：统一为可辩护表述——"同环境对比：API 层比 UI 层快约 3 倍（14.34s vs 43.24s，同规模 5 条）；本地确定性环境比公网 Demo 快约 **4~9 倍（视时段与用例集）**"。**改 README、MODULE_FEEDBACK M11 节、简历 bullet、Q2 四处。**
+
+### P1-2：CI 目标环境策略建立在一个错误事实上 —— GitHub runner **自带** Docker
+
+- **原文**：`.github/workflows/test.yml` 注释与 README 均写"**CI runner 无 Docker daemon**：起 MySQL + OrangeHRM 需自装、处理成本高" → 据此把 CI 目标定为**公网 Demo**。
+- **事实核对**：GitHub **hosted** runner 的 `ubuntu-latest` 镜像**预装 Docker 且 daemon 在运行**（这是官方标准镜像内容，`docker version` 在 workflow 里可直接用）。该理由不成立。
+- **后果**：项目把 CI 押在了**自己所有目标环境里最不稳的那个**（公网共享 Demo + 本机代理 + requests 无重试）。旁证：Builders 自己记录过公网全量 `2 failed`（requests 瞬态）；我上一轮实测过公网 goto 超时；本轮见 §2-B。**若现在推上仓库触发 CI，首次大概率直接红**——而 CI 是他们简历第 4 条 bullet 的内容。
+- **修复**：把 CI 目标改为**容器路径**（M10 的测试镜像 + M6 的 compose 被测系统都在本仓库，runner 有 Docker → 可跑出确定性结果）；若暂不改，必须在 README 里把"runner 无 Docker"这句改掉，并明确写"CI 目标＝公网 Demo，失败可能来自环境而非回归"。
+
+### P1-3：`requests` 默认信任环境代理 → 公网 flake 的归因不可靠（本轮亲身踩到）
+
+- **证据**：本轮 §2-B 的 11 条 `ProxyError` 全部来自 `HTTP_PROXY/HTTPS_PROXY` 被遵循、而代理进程未启动；同时**直连可达（302）**。也就是说：**同一份代码、同一个站点，仅仅因为本机代理状态不同，就从"16 passed + 2 skipped"变成"5 failed + 11 errors"**。
+- **影响**：项目在 Q4「flaky 排查与治理」与 Q8「项目不足」中把 requests 层失败一概归为"低频网络瞬态，重跑即过"。**这个归因在有代理的开发机上是不可靠的**——至少有一类失败根因是"环境代理"，而它被记成了"公网瞬态"。面试官若追问"你怎么排除是代理/本地网络问题"，当前答案站不住。
+- **修复（很小）**：在 `api/client.py` 显式声明代理策略并在 README 记录，例如
+  `self.session.trust_env = False`（直连，本地/CI 行为一致）或读 `ORANGEHRM_TRUST_ENV` 环境变量开关；并在 flake 记录里增加一栏"环境证据（代理/网络）"。
+- **诚实补充**：我在上一轮给出的"公网 3 次全绿"结论，也是**在代理可用的条件下**测得的；本节等于给那条结论补上限定条件（代理可用）。
+
+## 4. P0 — 从 7 小时前的评估起未动的三条（仍然阻塞"可投递"）
+
+1. **仓库仍无远程**（`git remote -v` 为空）→ 面试官拿不到链接。
+2. **CI 从未真实运行过**（M11 已如实标注 UNVERIFIED，红线守住了）→ 简历第 4 条 bullet 因此处于"写了但未验证"状态。
+3. **README 状态节仍停在 M6**：第 16 行还写「状态：NEEDS_FIX … 修复在途」，第 17 行还是 `- [ ] M7–M11` —— 而 M7–M11 已全部交付。**公开仓库前必须改，否则"诚实记录"的卖点当场反噬。**
+
+另：`MODULE_FEEDBACK.md` 状态表 M7/M9 仍为 `NEEDS_FIX`、M10/M11 仍为「待确认」，与 §1 的判定矛盾；按 AGENTS §7，**状态表应由 Builder 按审查结论收口**（我不代改）。
+
+**顺带**：所有者 4 小时前要求的「屏蔽私密文件」当前**未生效** —— `.gitignore` 里 `homework/` 规则在（第 44 行），但该文件**仍在 git 索引中**（`git ls-files homework` 有输出）。`.gitignore` 对已跟踪文件无效，需要重新 `git rm -r --cached homework` 并提交。当前我这次会话的暂存操作已被撤销，请确认是否有意为之。
+
+## 5. M11 交付物评价（优点要讲清楚）
+
+**做对的部分（这些都是真材实料，面试可用）**：
+
+- 数据与我的实测一致：用例 19（我 `--collect-only` 复核为 19 ✓）；本地 18 passed + 1 xfailed（我 22:0x 的全量日志显示 api 9 点 + db 2 点 + 1 xfail + e2e 2 点 + ui 5 点，零 F/E ✓）
+- 简历 4 条 bullet 都挂了实测数字，不是空话；三档介绍里放了三个真实排障故事（六轮证伪 / 硬删 vs 软删 / 断言 5s 盲区）+ 一次门禁事故
+- **主动守住红线**：明确写"简历不写 CI 已跑通"，Q8 主动交代项目不足（CI 未触发 / 镜像 2.72GB / 覆盖率未统计）—— 这是多数候选人做不到的
+- 8 个问答覆盖了测试开发岗高频考点，结构清晰
+
+**仍缺的部分**：
+
+| 项 | 说明 |
+|---|---|
+| 缺陷发现闭环 | 4 条 bullet 全是"框架能力"，**没有一条是"我测出了什么"**。测试岗最值钱的是缺陷报告（甚至给被测系统提 issue），目前只有学习性发现 |
+| 用例规模 | 19 条写进简历会被直接追问"你们用例规模"；建议 M0-lite 已承诺的 Leave 模块补到 60+ |
+| 测试设计证据 | `homework/` 屏蔽后，仓库里已**看不到任何用例设计文档** → 建议补去敏 `docs/test-design.md` |
+| 问答话术未入库 | M11 只记"答题结构"，注明"标准话术见对话记录" → 交付物依赖对话历史，**换台机器/换个会话就取不回来**，建议落成 `docs/interview-qa.md` |
+| 简历材料存放位置 | 放在 `MODULE_FEEDBACK.md`（只增的流程日志）里，用的时候要翻日志 → 建议独立成 `docs/resume.md` |
+| 工程化配套 | `pyproject.toml` / ruff / mypy / pre-commit / Makefile / 依赖锁定 / `docs/` 目录仍全部缺失 |
+
+## 6. 最终判定
+
+| 模块 | 判定 |
+|---|---|
+| M0–M6 | APPROVED（历史审查已闭环） |
+| M7 / M8 | **APPROVED**（二轮复审实测闭环，状态表待更新） |
+| M9 | **APPROVED_WITH_FIXES**（代码/配置已闭环；DoD＝真实触发未完成） |
+| M10 | **无法判定**（Docker daemon 不可用，容器内结论本轮不可复验） |
+| M11 | **NEEDS_FIX**（P1-1 口径回流 + P1-2 简历 CI 措辞需与 P1-2/P0-2 联动） |
+
+**给所有者的一句话**：代码这一层，你已经做得比绝大多数校招项目扎实；现在拦住你的不是技术，而是**三份文档没跟上代码**（README 停在 M6、状态表停在 NEEDS_FIX、简历口径退回到已被否掉的数字）。这三件事半天就能改完，但改之前**不要推公开仓库、不要投简历**——因为面试官看的第一眼就是它们。
+
+---
+---
+
+# 全项目终审：收口整改验证 + 上仓前终检（2026-09-17）
+
+> 审查对象：提交 `edd7716`（M11 收口整改）+ 当前未提交批次。
+> 方法：独立实跑 6 组 + 静态一致性审查（CI 步骤 vs 仓库自身文档）。
+> **环境限制**：Docker daemon 未运行（`npipe://...dockerDesktopLinuxEngine` 不可达）→ **容器路径与本地环境数字本轮不可复验**，相关结论标注 UNVERIFIED。
+
+## 1. 上轮 5 条 P1/P0 —— 逐项闭环核验
+
+| 上轮问题 | 闭环证据（审查方实测） | 判定 |
+|---|---|---|
+| P1-1 「11 倍速差」写回简历 | README 第 16 行、M11 数据统计、简历 bullet 1、Q2 全部改为「同环境 API vs UI 约 3 倍；本地 vs 公网约 **4~9 倍**（视用例集与时段）」。全仓 grep「11 倍」仅剩三处且都正当：MODULE_FEEDBACK M6 历史行（**已追加登记为已知陈旧口径**）、`docs/interview-qa.md` 的纠错演练行（"禁止说单点 11 倍——已被审查否决"）、REVIEW_FEEDBACK（审查方记录不改） | ✅ **闭环** |
+| P1-2 CI 目标环境的事实错误 | workflow 注释已更正为「hosted runner 预装 Docker 且 daemon 运行中」，CI 目标**改走容器路径**（起 M6 compose → 无人值守安装 → 建 ohrm_ro → build 测试镜像 → 容器内分层跑） | ✅ **闭环**（但引出新 P1-1，见 §3） |
+| P1-3 `requests` 信任环境代理 | `api/client.py:41` 加 `trust_env = False`（可用 `ORANGEHRM_TRUST_ENV=true` 显式打开）。**实测验证**：在 `HTTP_PROXY/HTTPS_PROXY` 指向**已确认不可达**的 `127.0.0.1:7897` 条件下跑 `-m api` → **9 passed in 25.92s**（整改前同一条件下是 9 条 `ProxyError`） | ✅ **闭环** |
+| P0-1 仓库无远程 | `git remote -v` 仍为空 | ❌ **未解决**（属用户操作，Builder 已在 `docs/release-checklist.md` 如实标注"未解决"） |
+| P0-3 README 状态脱节 | README 状态节已逐模块更新至 M11（M7–M11 全部 `[x]`）；MODULE_FEEDBACK 状态表同步收口：M7 `APPROVED` / M8 `APPROVED` / M9 `APPROVED_WITH_FIXES` / M10 `WAITING_FOR_REVIEW` / M11 `NEEDS_FIX（整改完成待复审）` —— 与我此前判定一致 | ✅ **闭环** |
+
+**顺带完成（我上轮写在"仍缺"里的）**：`docs/` 三件套 + checklist（test-design / resume / interview-qa / release-checklist）、`pyproject.toml`、requirements 由 `>=` 改 `==` 精确锁定、新增第 5 条简历 bullet。**其中依赖锁定我逐项核对：5/5 与 venv 实测版本完全一致**（pytest 9.1.1 / playwright 1.62.0 / requests 2.34.2 / pymysql 1.2.0 / allure-pytest 2.16.0）✓
+
+## 2. 独立复跑证据（审查方自有数据）
+
+| # | 场景 | 结果 |
+|---|---|---|
+| A | `-m api`，环境变量代理指向**死地址** | **9 passed in 25.92s**（验证 P1-3 修复有效） |
+| B | `-m ui`，同一死代理 | **5 passed in 45.56s** |
+| C | 公网默认环境全量 | **16 passed + 3 skipped in 94.38s，exit=0**（db 三重门控正确 skip） |
+| D | 版本锁定核对（`importlib.metadata` vs `requirements.txt`） | 5/5 一致 ✓ |
+| E | `git ls-files homework` | 空 → **屏蔽生效** ✓ |
+| F | ruff 落地情况 | `No module named ruff`；requirements 未声明；全仓无运行记录 → **纯配置，未生效**（见 P2-2） |
+
+**对我上一轮归因的修正（诚实登记）**：上轮我把公网全红笼统归为"代理"。精确化后应为：**API/e2e 的 11 条 `ProxyError` = 代理**（该修复有效，见 A）；**UI 的 5 条 `goto` TimeoutError = 公网站点侧超时**——因为今天在**同一个死代理**下 UI 层反而 5 passed，说明 Chromium 不走该环境变量代理。这两类是不同根因，M7 的留痕系统恰好能把它们区分开（`ProxyError` vs `Playwright TimeoutError`）——这本身是 M7 价值的又一例证。
+
+## 3. 新发现
+
+### P1-1：CI 的安装步骤缺 DROP，与仓库自身的「从零」流程矛盾（高风险，UNVERIFIED）
+
+- **仓库自身文档**（README「从零重建」）明确写：`compose 为 DB 预置了空库 orangehrm 与用户 ohrm，而安装器以 isExistingDatabase: n 自建库——重建时先 DROP 预置对象保证语义一致，再走首次安装流程`，并给出 DROP 命令。
+- **workflow**（`.github/workflows/test.yml:49-59`）：`up -d --wait` → 直接 `cli_install.php`，**没有 DROP 步骤**。
+- **为什么这是必现路径**：CI runner 每次都是全新环境，而 compose 的 `MYSQL_DATABASE: orangehrm` / `MYSQL_USER: ohrm` 一定会预置库与用户 —— 即**恰好命中 README 描述的"需要先 DROP"的场景**。
+- **状态**：我无法实测（Docker daemon 未运行）→ **UNVERIFIED**；但"workflow 与仓库自身文档描述的同一流程不一致"是**可验证的事实**。CI 的 DoD 是跑绿，这一步是最可能的首次失败点。
+- **修复**：把 README 重建节的第 3 步（DROP 预置库/用户）插到 workflow 的安装步骤之前，两三行。
+
+### P2-1：简历 bullet 5 的标题与内容不匹配（会被当场追问）
+
+- 标题写作「**缺陷发现闭环**（测试岗最值钱的点）」，内容三条是：`employee_id` 为 NULL / 删除是物理硬删 / 登录接口六轮探测。**这三条都是"被测系统的行为发现"，不是缺陷**；且"闭环"未发生（没有提 issue、没有修复验证）。
+- 面试官大概率追问「这算 bug 吗？」「闭环指什么？谁修的？」——现在的措辞经不起。
+- **修复**：改标题为「**跨层行为差异发现**」，或补一个真实缺陷案例（哪怕是在自建的本地环境里注入一个 bug、写缺陷报告、修复后再验证——这就是真正的"闭环"）。
+
+### P2-2：`[tool.ruff]` 配了但从未运行，依赖也未声明（与 `elapsed_ms` 恒 null 同一模式）
+
+- `pyproject.toml` 有 `[tool.ruff]` 段（line-length 100 / py311 / ignore F401），但：ruff **未安装**（`No module named ruff`）、**未写进 requirements.txt**、**全仓无任何运行记录**。
+- 后果：本机与 CI 都跑不了这段配置；"已加静态检查"目前是装饰。这正是本项目刚修完的那类问题（配置/声明先写、实际未生效）。
+- **修复**：`pip install ruff` → 跑一次 `ruff check .`（会立刻暴露存量告警，需决定修还是 ignore）→ 把 `ruff` 加入依赖 → CI 加一步 `ruff check .`。要么就删掉该配置段。
+
+### P2-3：交付态 ≠ 提交态（第 4 次），且这次差异含"上仓必需项"
+
+未提交内容：
+
+| 项 | 状态 | 为什么必须提交 |
+|---|---|---|
+| `requirements.txt` | 已改 `==` 锁定，**未提交** | 公开仓库里没有依赖锁定 = "环境一致性"这条卖点落空 |
+| `MODULE_FEEDBACK.md` | 2026-09-17 收口登记行，**未提交** | 口径登记是"已知陈旧口径"的唯一证据 |
+| `docs/release-checklist.md` | **未跟踪** | 上仓 checklist 本身不在仓库里 |
+| `REVIEW_FEEDBACK.md` | 审查方本节，未提交 | 审查记录连续性 |
+
+**上仓前必须一次提交**。否则面试官 clone 下来看不到这些。
+
+## 4. P3
+
+1. **CI 每次重建 2.7GB 测试镜像且无层缓存**（`build test` 无 `cache-from/to`）→ runner 上耗时可能 5~15 分钟；`timeout-minutes: 45` 偏紧。建议加 GitHub Actions 的 Docker 层缓存。
+2. **CI 的多个前提从未在 runner 上验证**：`orangehrm/orangehrm:5.9` 镜像内是否有 `curl`（app healthcheck 依赖它）、`docker compose up -d --wait` 的就绪判定、`docker compose run --rm test -m api` 依赖 Dockerfile 的 `ENTRYPOINT ["python","-m","pytest"]`（已核对 ✓ 追加参数语义正确）。建议上仓前用**临时私有仓库**先触发一次，把步骤级可执行性验掉。
+3. **本地/容器环境数字本轮无法复验**：`本地 17~22s / 容器 10~13s` 属 Builder 自述，我因 Docker daemon 未运行无法核 → 标 **UNVERIFIED**（不影响交付，但面试引用前建议自己再跑一次）。
+4. `docs/release-checklist.md` 里 P0-2 自我标注 UNVERIFIED、P0-1 标注"未解决"—— **这种诚实登记应该保持**，不要为了让清单全绿而打勾。
+
+## 5. 交付物评价（docs 三件套）
+
+**质量高于预期**，逐份评价：
+
+- `docs/test-design.md`（70 行）：C1–C4 约束 → 分层配比表（含"为什么不更多"）→ 6 条关键设计决策（每条可追问"为什么"）。**这正是我上轮担心的"homework 屏蔽后仓库里看不到测试设计能力"的解**，且去敏处理得当 ✓
+- `docs/resume.md`（54 行）：4+1 条 bullet 全挂实测数字；三档介绍分级清晰；**末尾"面试口头演练清单"里专门列了"被问 11 倍速差能纠正为 4~9 倍"** ✓ 连纠错话术都准备了
+- `docs/interview-qa.md`（94 行）：Q1/Q2 读到的部分质量高（Playwright 选型三层回答 + 主动讲代价；API 多于 UI 用金字塔实测回应"是不是偷懒"）；**话术终于脱离对话历史、可换机器取用** ✓
+- `docs/release-checklist.md`（47 行）：按审查 P0/P1 逐项核验、标注 UNVERIFIED、不粉饰 ✓
+
+## 6. 最终判定
+
+| 模块 | 判定 | 说明 |
+|---|---|---|
+| M0–M6 | APPROVED | 历史闭环 |
+| M7 / M8 | APPROVED | 状态表已同步 |
+| M9 | **APPROVED_WITH_FIXES** | P0 已修；但 DoD（跑绿）未达成，且新发现 P1-1（DROP）会挡在首次触发路径上 |
+| M10 | **WAITING_FOR_REVIEW（无法判定）** | Docker daemon 未运行，E1–E6 证据与容器内数字本轮不可复验 |
+| M11 | **APPROVED_WITH_FIXES** | 上轮 3 条 P1 全部闭环；新增 P2-1（bullet 5 措辞）/P2-2（ruff）/P2-3（未提交批次） |
+
+**全项目状态：技术上已经具备上仓条件；差 3 件具体的事。**
+
+## 7. 上仓前必须做的三件事（按顺序）
+
+1. **补 CI 安装前的 DROP 步骤**（P1-1），与 README 的"从零重建"对齐 —— 否则首次 CI 很可能红在安装步
+2. **把未提交批次一次提交**（requirements 锁定 / MODULE_FEEDBACK 登记 / release-checklist / 本审查节）—— 否则上仓后这些都不在
+3. **建远程仓库并真跑一次 CI**（P0-1）—— 这是唯一"必须人来做"的一步，也是 M9 的 DoD。**在它跑绿之前，简历里只能写"CI workflow 已就绪"**（这一条你们自己已经守住了，继续保持）
+
+做完这三件，这个项目就**可以从"学习项目"改称"可投递项目"**了。
