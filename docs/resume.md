@@ -53,3 +53,18 @@ Docker 化测试环境。
 - [ ] 3min 版故事讲得自然（不背稿）
 - [ ] 被问"11 倍速差"能纠正为"4~9 倍、同环境、视时段用例集"
 - [ ] 被问"CI 跑过几次"能诚实回答"真实触发待上仓，workflow 已就绪"
+
+---
+
+## 完整项目经历条目（简历可直接粘贴）
+
+**2026.09　Web 自动化测试框架（OrangeHRM）** ｜ 职位：测试开发（独立完成）
+**技术栈**：Python | Playwright | pytest | POM | requests | PyMySQL | Allure | Docker | GitHub Actions
+**背景**：业务规则与 UI 混写、反馈慢；共享环境数据污染；失败无现场。
+**内容**：
+· 四层测试金字塔（API / UI / E2E / DB，19 条用例），业务规则下沉 API 层——实测单例 2.8s vs UI 8.1s（2.9 倍）
+· 失败自动留痕（截图 / Trace / netlog / API 日志）覆盖四层、成功零产物，集成 Allure
+· 稳定性治理：断言超时统一、goto 重试 + 可观测计数、环境门控、关闭 requests 代理继承
+· compose 一键起被测系统与测试容器；分层 workflow（API 先跑）+ flake 度量脚本
+**成果**：公网 16 passed + 3 skipped / 85s，本地 18 passed + 1 xfailed（快 4~9 倍）；DB 171 表只读校验。CI 仅就绪，未真实触发。
+**链接**：https://github.com/likui9969-alt/web-automation

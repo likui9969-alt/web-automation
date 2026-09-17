@@ -16,10 +16,14 @@
 #   步骤：起被测系统（含首次无人值守安装）→ 建 ohrm_ro 只读账号 →
 #   build 测试镜像 → 分层在容器内跑 → 上传报告/留痕。
 #
-#   ⚠️ 诚实声明（UNVERIFIED）：本 workflow 的容器路径**未在真实 GitHub runner 上
-#   触发验证**（本地 act 因网络不可达只验证了 job 结构；真实触发待仓库上仓后闭环，
-#   闭环前不得宣称"CI 已跑通"）。历史上 `-m api / -m ui / -m e2e` 分层直跑公网
-#   的旧版曾验证过语法级正确性，但容器路径为新改，首次真实触发前保持 UNVERIFIED。
+#   ⚠️ 诚实声明（UNVERIFIED）：容器路径**已在真实 runner 触发过，但尚未跑绿**。
+#   2026-09-17 首次真实触发（push 触发，run 35174500668 / 35174365514）→ 失败：
+#   第一步「起被测系统」即红（exit code 3，耗时 76s），安装/只读账号/构建步骤被
+#   跳过，UI 与 e2e 连锁红，两份 artifact 均空。**根因未确认**——GitHub 日志下载
+#   需仓库 admin 权限（API 返回 403），本地 Docker daemon 未运行无法复现，故本轮
+#   结论保持 UNVERIFIED，不猜原因。已按**可证明缺陷**整改四处（显式限定 up 服务、
+#   补 README 要求的 DROP 步骤、起服务失败导出 compose 日志让下次失败自证、
+#   层执行门控 up 成功）。跑绿之前，任何简历/面试材料不得宣称"CI 已跑通"。
 #
 # 国内网络说明：GitHub runner 在海外，playwright CDN / pip / docker hub 均可达
 #   （M10 镜像构建在本地已实测网络可拉取），不需要 npmmirror 镜像。
@@ -46,10 +50,32 @@ jobs:
       # M11 全局收口审查 P1-2 整改：CI 目标改容器路径。
       # runner 自带 Docker，仓库内 M6 被测系统 compose + M10 测试镜像齐全 –
       # 在容器内跑确定性结果，不走公网共享 Demo。
+      # ⚠️ 必须显式列出 `db app`：compose 文件里的 test 服务没有 profiles，
+      # 不限定服务时 `up` 会连带构建测试镜像并启动它（ENTRYPOINT 是无过滤的
+      # `python -m pytest`）——既绕过下面的分层执行设计，又会让 --wait 因该
+      # 一次性容器退出而判失败。
+      # --wait-timeout：healthcheck 一直不过时不要挂到 job 的 45 分钟上限。
       - name: 起被测系统（M6 compose：db + app）
+        id: up
         run: |
-          docker compose -f docker/docker-compose.yml up -d --wait
-          docker compose -f docker/docker-compose.yml ps
+          set +e
+          docker compose -f docker/docker-compose.yml up -d --wait --wait-timeout 300 db app
+          rc=$?
+          docker compose -f docker/docker-compose.yml ps -a
+          if [ $rc -ne 0 ]; then
+            echo "::group::compose 起服务失败 —— 导出诊断（把 M7「失败留痕」思路移植到 CI）"
+            docker compose -f docker/docker-compose.yml logs --no-color --tail=200
+            echo "::endgroup::"
+            exit $rc
+          fi
+
+      # README「从零重建」明确要求：compose 为 DB 预置了空库 orangehrm 与用户 ohrm，
+      # 而安装器以 isExistingDatabase: n 自建库 → 必须先 DROP 预置对象保证语义一致。
+      # runner 每次都是全新卷，必然命中该场景（M11 全局收口审查 P1-1 登记项）。
+      - name: 清理 compose 预置库/用户（对齐 README 从零重建流程）
+        run: |
+          docker exec ohrm-db mysql -uroot -proot_password_local -e \
+            "DROP DATABASE IF EXISTS orangehrm; DROP USER IF EXISTS 'ohrm'@'%'; FLUSH PRIVILEGES;"
 
       - name: 首次安装 OrangeHRM（无人值守安装器，M6 实测流程）
         run: |
@@ -71,15 +97,18 @@ jobs:
       # 分层容器内执行（M9 设计）：API 快先反馈；任一层红 → pipeline 红。
       # if: always() 保证 API 红也在本轮拿到 UI/e2e 结果（Review P2-3）：
       # 环境 flake 不该吃掉后续层的覆盖信息，最终判红仍由各层退出码保证。
+      # 2026-09-17 修正：叠加 `steps.up.outcome == 'success'`——被测系统没起来时，
+      # 后两层必然红，那种红是"连锁噪声"而非覆盖信息（首次真实触发实测：起服务
+      # 步骤红 + UI/e2e 跟着红 + 两层 artifact 皆空，信号被污染）。
       - name: API 层（快，先反馈）
         run: docker compose -f docker/docker-compose.yml run --rm test -m api
 
       - name: UI 层
-        if: always()
+        if: always() && steps.up.outcome == 'success'
         run: docker compose -f docker/docker-compose.yml run --rm test -m ui
 
       - name: e2e 层（含 db 校验：容器内 BASE_URL=ohrm-app 被门控识别为本地）
-        if: always()
+        if: always() && steps.up.outcome == 'success'
         run: docker compose -f docker/docker-compose.yml run --rm test -m "e2e or db"
 
       - name: 上传 Allure 结果（M8）

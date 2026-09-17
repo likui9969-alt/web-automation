@@ -1,6 +1,6 @@
 # OrangeHRM 企业级 Web 自动化测试平台
 
-以 OrangeHRM Demo（https://opensource-demo.orangehrmlive.com/）为被测系统的测试开发学习项目：
+以 OrangeHRM Demo（https://opensource-demo.orangehrmlive.com/  ）为被测系统的测试开发学习项目：
 UI 自动化（Playwright）+ API 自动化（Requests）+ 分层测试设计 + CI/CD + Docker。
 
 ## 项目状态
@@ -74,6 +74,26 @@ allure generate reports/allure-results -o reports/allure-report --clean
 allure open reports/allure-report   # 浏览器打开报告
 # 注意：失败用例的现场截图（M7 留痕）会自动作为附件进入报告
 ```
+
+### 有头模式（想看浏览器实际执行）
+
+默认**无头**（日常回归与 CI 不需要弹窗）。要看着浏览器跑，显式关掉无头：
+
+```powershell
+$env:ORANGEHRM_HEADLESS = "false"
+python -m pytest -m ui        # 弹出 Chromium 窗口
+```
+
+```bash
+# Git Bash / Linux / macOS
+ORANGEHRM_HEADLESS=false python -m pytest -m ui
+```
+
+- 开关只在 `config/settings.py` 一处取值（`HEADLESS`），由 `conftest.py` 的 `browser` fixture 透传给 `chromium.launch()`，**不需要改代码**。
+- 解析约定：**只有字符串 `"true"` 表示无头**，其他任何值（`false` / `0` / `no`）都视为有头。注意 `ORANGEHRM_HEADLESS=1` 得到的是**有头**，与直觉相反。
+- 有头模式用**完整 chromium**（`chromium-1234`），无头用 `chromium_headless_shell`——`playwright install chromium` 会一并下载，两个组件都要在。
+- 排查单个失败用例更实用：`python -m pytest "tests/ui/test_login.py::test_login_valid_credentials"`。
+- 代价：有头更慢且会抢焦点，**只在本地排查时开，不要在 CI 里开**。
 
 ### 本地 Docker 环境（M6 起，含 DB 校验）
 
