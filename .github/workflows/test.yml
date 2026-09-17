@@ -1,22 +1,28 @@
-# OrangeHRM 自动化测试 CI（M9）
+# OrangeHRM 自动化测试 CI（M9，M11 全局收口审查 P1-2 整改）
 #
 # 为什么需要 CI（PLAN M9）：本地能跑 = 起点，无人值守的回归 = 质量红线。
 # 每次 push 自动验证「改代码没有破坏任何既有行为」——面试谈"自动化为什么
 # 必须进 CI"的答案就长在 workflow 上。
 #
-# 分层执行顺序（为什么 API 先跑）：API 快（~30s）且稳，先跑出快速反馈；
+# 分层执行顺序（为什么 API 先跑）：API 快且稳，先跑出快速反馈；
 # UI/e2e 慢且有公网波动，后跑。任何一层红 → pipeline 红（不允许静默）。
 #
-# CI 目标环境策略（M6 二轮 P2-2 硬性闭环，2026-09-16 决策）：
-#   CI 固定跑 **公网 Demo**（项目默认目标，README 声明），DB 用例按环境
-#   门控自动 skip（conftest 双重门控，公网必然 skip，不红不假绿）。
-#   不选本地 Docker 的原因：CI runner 无 Docker daemon，起 MySQL+OrangeHRM
-#   成本高、慢、脆弱，且 M6 内容在本地已实测；公网 flake（goto 超时/requests
-#   瞬态）有 M7 留痕 + M8 报告兜底，失败可定位可重跑，详见 README「CI 与
-#   flakes」节。requests 层不加代码重试的理由与记录也见该节。
+# CI 目标环境策略（M11 全局收口审查 P1-2 整改）：
+#   **改走容器路径**。事实核对：GitHub hosted runner（ubuntu-latest）**预装
+#   Docker 且 daemon 运行中**——旧版注释"CI runner 无 Docker daemon"是错误论据
+#   （M11 复审 P1-2 已更正）。仓库内既有 M6 的被测系统 compose（db+app）
+#   也有 M10 的测试镜像（Python+Playwright+Chromium），runner 有 Docker →
+#   可跑出**确定性结果**（不走公网共享 Demo，避免环境瞬态打红）。
+#   步骤：起被测系统（含首次无人值守安装）→ 建 ohrm_ro 只读账号 →
+#   build 测试镜像 → 分层在容器内跑 → 上传报告/留痕。
 #
-# 国内网络说明：GitHub runner 在海外，playwright CDN / pip 均可达，
-#   不需要 npmmirror 镜像（镜像只用于本机，M1 记录）。
+#   ⚠️ 诚实声明（UNVERIFIED）：本 workflow 的容器路径**未在真实 GitHub runner 上
+#   触发验证**（本地 act 因网络不可达只验证了 job 结构；真实触发待仓库上仓后闭环，
+#   闭环前不得宣称"CI 已跑通"）。历史上 `-m api / -m ui / -m e2e` 分层直跑公网
+#   的旧版曾验证过语法级正确性，但容器路径为新改，首次真实触发前保持 UNVERIFIED。
+#
+# 国内网络说明：GitHub runner 在海外，playwright CDN / pip / docker hub 均可达
+#   （M10 镜像构建在本地已实测网络可拉取），不需要 npmmirror 镜像。
 
 name: CI
 
@@ -33,42 +39,48 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: 安装依赖
-        run: pip install -r requirements.txt
-
-      - name: 安装 Chromium（含系统依赖）
+      # M11 全局收口审查 P1-2 整改：CI 目标改容器路径。
+      # runner 自带 Docker，仓库内 M6 被测系统 compose + M10 测试镜像齐全 –
+      # 在容器内跑确定性结果，不走公网共享 Demo。
+      - name: 起被测系统（M6 compose：db + app）
         run: |
-          # 浏览器路径策略（M9 P0 修复：与 conftest.py setdefault 条件化配套）：
-          #   - conftest 仅当项目内 .playwright-browsers 存在时才 setdefault → 本机走项目内；
-          #   - CI runner 上该目录不存在 → 不设置 → 走 Playwright 默认路径，
-          #     即 Linux 的 $HOME/.cache/ms-playwright（= playwright install 落点）。
-          #   - 此处显式写 $HOME（bash 双引号内会展开；比 ~ 可靠，~ 是字面量）
-          #     与 install 落点保证一致，是"文件级 + 代码级"双保险。
-          echo "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" >> "$GITHUB_ENV"
-          python -m playwright install --with-deps chromium
+          docker compose -f docker/docker-compose.yml up -d --wait
+          docker compose -f docker/docker-compose.yml ps
 
-      # 分层执行（M9 设计）：API 快先反馈；任一层红 → pipeline 红。
+      - name: 首次安装 OrangeHRM（无人值守安装器，M6 实测流程）
+        run: |
+          # cli_install.php 是读配置文件的非交互入口（console 版纯交互 M6 实测）；
+          # 安装器会自建库/表并自动删除容器内含口令的 yaml。
+          docker cp docker/cli_install_config.yaml ohrm-app:/var/www/html/installer/
+          docker exec -w /var/www/html ohrm-app php installer/cli_install.php
+
+      - name: 创建 DB 校验只读账号（最小权限，M6 实测）
+        run: |
+          # ohrm_ro 仅 SELECT；账号由安装器建库后才有目标库可授权。
+          docker exec ohrm-db mysql -uroot -proot_password_local -e \
+            "CREATE USER IF NOT EXISTS 'ohrm_ro'@'%' IDENTIFIED WITH mysql_native_password BY 'ohrm_ro_password_local'; \
+             GRANT SELECT ON orangehrm.* TO 'ohrm_ro'@'%'; FLUSH PRIVILEGES;"
+
+      - name: 构建测试镜像（M10 Dockerfile）
+        run: docker compose -f docker/docker-compose.yml build test
+
+      # 分层容器内执行（M9 设计）：API 快先反馈；任一层红 → pipeline 红。
       # if: always() 保证 API 红也在本轮拿到 UI/e2e 结果（Review P2-3）：
-      # 公网 flake 不该吃掉后续层的覆盖信息，最终判红仍由各层退出码保证。
+      # 环境 flake 不该吃掉后续层的覆盖信息，最终判红仍由各层退出码保证。
       - name: API 层（快，先反馈）
-        run: python -m pytest -m api
+        run: docker compose -f docker/docker-compose.yml run --rm test -m api
 
       - name: UI 层
         if: always()
-        run: python -m pytest -m ui
+        run: docker compose -f docker/docker-compose.yml run --rm test -m ui
 
-      - name: e2e 层
+      - name: e2e 层（含 db 校验：容器内 BASE_URL=ohrm-app 被门控识别为本地）
         if: always()
-        run: python -m pytest -m e2e
+        run: docker compose -f docker/docker-compose.yml run --rm test -m "e2e or db"
 
       - name: 上传 Allure 结果（M8）
         if: always()

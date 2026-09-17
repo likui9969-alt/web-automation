@@ -15,6 +15,7 @@
 4. 会话靠 orangehrm Cookie 维持（M0 已实测 HttpOnly）
 """
 import html
+import os
 import re
 
 import requests
@@ -32,6 +33,13 @@ class OrangeHRMClient:
         self.base_url = base_url or settings.BASE_URL
         self.session = requests.Session()
         self.session.headers["Accept"] = "application/json"
+        # 代理策略（M11 全局收口审查 P1-3）：requests 默认 trust_env=True 会遵循
+        # HTTP_PROXY/HTTPS_PROXY 环境变量——开发机代理未启动时，同一份代码会从
+        # "16 passed" 变成 "5 failed + 11 ProxyError"（审查方 2026-09-16 亲身踩到），
+        # 且失败被误记为"公网瞬态"。默认关掉（直连，行为与 CI/容器一致），
+        # 需要显式走代理时用 ORANGEHRM_TRUST_ENV=true 打开。
+        if not os.getenv("ORANGEHRM_TRUST_ENV", "false").lower() == "true":
+            self.session.trust_env = False
         # M7 留痕：每个响应进入全局 API 请求日志（纯记录，不拦截、不改行为）
         self.session.hooks["response"].append(self._log_response)
 

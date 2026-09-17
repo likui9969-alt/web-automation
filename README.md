@@ -13,8 +13,14 @@ UI 自动化（Playwright）+ API 自动化（Requests）+ 分层测试设计 + 
 - [x] M3：POM 重构，定位器集中到 LoginPage，实测 **5 passed 43.24s**（含 Demo 站时段性过载的 flaky 治理：domcontentloaded 等待策略 + 超时 20s 校准，过程留痕）
 - [x] M4：API 层（requests 会话客户端 + PIM 接口封装），**5 passed 14.34s**（P2-1 修复后复跑 16.57s）；全量 UI+API **10 passed 65.40s**
 - [x] M5：混合造数（数据工厂唯一命名 + API cookie 注入 storage_state 会话复用 + e2e 双向闭环），**全量 12 passed**（Builder 111.68s / Reviewer 104.26s 双绿）；两次真实排障（Save 后竞态 → toast 语义等待；expect 断言 5s 盲区 → 超时校准）
-- [x] M6：本地 Docker 部署（OrangeHRM 5.9 + MySQL 8.0，无人值守安装器）+ DB 持久化校验层（pymysql 只读、ohrm_ro 最小权限账号、环境门控 skip）。**本地全量 18 条通过**（独立复审实测极差区间约 4~9 倍于公网同套，具体视用例集与时段；本地确定性 5/5）；两次真实排障（解释器错位 → 项目 venv；localhost cookie domain 陷阱 → domain 取 BASE_URL host）。**状态：NEEDS_FIX（独立复审 P1-1/P1-2/P1-3，M6 原 APPROVED 因审查节由实现方代笔被所有者裁定作废；修复在途，见 MODULE_FEEDBACK）**
-- [ ] M7–M11：失败定位 → Allure → CI → 模拟环境
+- [x] M6：本地 Docker 部署（OrangeHRM 5.9 + MySQL 8.0，无人值守安装器）+ DB 持久化校验层（pymysql 只读、ohrm_ro 最小权限账号、环境门控 skip）。**本地全量 18 条通过**（本地确定性环境比公网 Demo 快约 4~9 倍，视用例集与时段；同套口径审查方复测 ~7.7 倍）；两次真实排障（解释器错位 → 项目 venv；localhost cookie domain 陷阱 → domain 取 BASE_URL host）。**历经两轮独立复审，P1 全清零后 APPROVED_WITH_FIXES → M6 关闭**（历史：M6 原 APPROVED 曾因审查节由实现方代笔被所有者作废，沉淀为 AGENTS §13.1 制度）
+- [x] M7：失败定位体系（失败自动留痕四件套：截图 / Playwright Trace / 浏览器 netlog / API 请求日志；成功零产物；skip/xfail 不误记）。**审查方独立实测闭环 → APPROVED**
+- [x] M8：Allure 报告（feature 4 组 / title / severity / attachment 失败截图进报告）。**审查方实测 attachment 链路有效 → APPROVED**
+- [x] M9：GitHub Actions 分层 CI（API → UI → e2e，`if: always()` 防吞层）+ flake 度量脚本（ps1 + bash 双平台）+ 浏览器路径代码级根治。**代码/配置层面审查闭环 → APPROVED_WITH_FIXES；唯一剩余 = 真实 Actions 触发（UNVERIFIED，未宣称跑通，需上仓后闭环）**
+- [x] M10：测试执行环境 Docker 化（Dockerfile + compose test 服务，容器内全量 18 passed + 1 xfailed 实测；E1–E6 不利条件验证：失败留痕/CWD 兜底/门控识别/零留痕）。**已提交，待独立复审**
+- [x] M11：复盘交付物（真实数据统计 / 简历 bullet / 三档项目介绍 / 八问答话术见 docs/）。**按全局收口审查整改中**
+
+> **状态说明**：当前多数模块已 APPROVED；M9 真实 GitHub Actions 触发、M10 独立复审为开放项（见 MODULE_FEEDBACK 状态表与 REVIEW_FEEDBACK）。**公开仓库/简历中不得写"CI 已跑通"**——只能写"workflow 已就绪（真实触发待上仓）"。
 
 ## 目录结构与设计理由
 
@@ -130,27 +136,21 @@ docker exec ohrm-db mysql -uroot -proot_password_local -e "DROP DATABASE IF EXIS
 
 ## CI 与 flakes（M9，含 M6 二轮 P2-2 闭环）
 
-### CI 目标环境策略（2026-09-16 决策）
+### CI 目标环境策略（M11 全局收口审查 P1-2 整改）
 
-CI 固定跑**公网 Demo**（项目默认目标，见上），DB 用例按环境门控自动 skip
-（见 conftest 双重门控）——不红、不假绿。**不选本地 Docker 作为 CI 目标**，理由：
+CI 目标为**容器路径**（确定性结果）：GitHub hosted runner（ubuntu-latest）**自带
+Docker**（正式镜像标准内容），仓库内 M6 被测系统 compose（db+app）与 M10 测试
+镜像（Python+Playwright+Chromium）齐备——workflow 起被测系统 → 无人值守安装 →
+建只读账号 → 容器内分层跑。**不走公网共享 Demo**（避免环境瞬态打红），
+DB 用例因 `BASE_URL=ohrm-app` 被门控识别为本地，**在 CI 中真实执行**。
 
-1. CI runner 无 Docker daemon：起 MySQL + OrangeHRM 需自装、处理成本高，且该
-   场景已在本机实测（M6），CI 重复执行价值低；M10 Docker 化时再评估 CI 内建
-2. 公网 flake 有完整兜底：M7 失败留痕（截图/Trace/请求日志）+ M8 报告附件——
-   失败可定位、可重跑，不阻塞定位
-3. requests 层不加代码重试（AGENTS §14）——实测 API 层 9 条多次全绿，Transient
-   ReadTimeout 低频且重跑即过；若频率上升（flake 记录连续 > 20%），再引入
-   urllib3 Retry 并记录在 MODULE_FEEDBACK
-
-**DB 层在 CI 中的覆盖范围（M9 Review P2-1 显式声明）**：
-CI workflow 按分层只跑 `-m api` / `-m ui` / `-m e2e`，**不跑 `-m db`**——因此
-DB 校验（2 条持久化用例 + 1 条 xfail strict 负对照 canary）**在 CI 中零覆盖**
-（本地环境单独跑，见上文「本地 Docker 环境」节）。后果与补齐条件：
-- 后果：M6 的"数据真落库/真删"承诺没有 CI 级回归防护；canary 的报警价值
-  （断言失效时 xpass → 套件红）在 CI 里不会触发
-- 补齐条件：CI runner 引入 MySQL service container（或复用 M10 测试镜像）后再
-  加 `-m db` 步；在此之前 DB 层的回归防护由「本地全量 + M6 已闭环记录」承担
+> ⚠️ **诚实声明**：容器路径 workflow 尚未在真实 GitHub runner 触发（本地 act 网络
+> 不可达只验证 job 结构）；**在真实 Actions 跑绿前，不得宣称"CI 已跑通"**，
+> 只能写"workflow 已就绪（真实触发待上仓）"。
+>
+> 历史更正（M11 复审 P1-2）：旧版注释"CI runner 无 Docker daemon"是**错误论据**
+> ——runner 自带 Docker；据此曾把 CI 押在公网 Demo（自身最不稳的目标）的决定
+> 已废弃。
 
 ### flake 度量命令（P2-2「有可复跑命令」，M9 Review P2-2 起双平台）
 
@@ -163,6 +163,17 @@ bash scripts/flake_measure.sh -r 3 -m ui
 
 任何一次 goto 重试触发都会在 pytest_terminal_summary 输出（M7 P2-1 闭环），
 flake 记录须含该计数，区分"flaky 消失"与"被重试救回"。
+
+### 代理策略（M11 全局收口审查 P1-3）
+
+`requests` 默认遵循 `HTTP_PROXY/HTTPS_PROXY` 环境变量（trust_env=True）。开发机
+代理未启动时，同一份代码会从全绿变成大范围 `ProxyError`（审查方 2026-09-16 亲身
+踩到：11 条 ProxyError + 5 条 TimeoutError，而直连 302 可达）——这类失败曾长期
+被误记为"公网瞬态"，归因不可靠。
+
+默认策略：**忽略环境代理直连**（`api/client.py`：`session.trust_env = False`）——
+本机/CI/容器行为一致。需要显式走代理时设 `ORANGEHRM_TRUST_ENV=true`。
+flake 记录须增加"环境证据"栏（代理状态/网络可达性），失败归因先排除环境再谈代码。
 
 ### 容器内跑测试（M10：测试执行环境 Docker 化）
 

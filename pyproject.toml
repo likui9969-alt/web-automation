@@ -1,0 +1,17 @@
+# M11 收口审查 R-11（P3 轻量落地）：
+# 只提供工具链元数据 + ruff 静态检查配置（低成本高价值）。
+# 不引入 mypy/pre-commit/Makefile——本项目是学习型自动化测试工程而非生产
+# 服务代码，遵守 KISS/YAGNI（审查方该项按 P3 优化登记，非阻塞）。
+[project]
+name = "orangehrm-web-automation"
+version = "1.0.0"
+description = "OrangeHRM 自动化测试学习项目（UI/API/DB 分层 + CI + Docker）"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# 测试代码对未使用 import 的规则放宽（allure.title 装饰器等常见场景）
+ignore = ["F401"]
