@@ -2,9 +2,15 @@
 # 锁定依赖清单，保证任何机器（本机 / CI / Docker）执行
 # `pip install -r requirements.txt` 后得到一致的环境。
 # 引入原则：每个模块用到才加，不提前堆。
+#
+# 版本策略（上仓前收口，2026-09-17）：
+# 从 `>=` 放宽改为 `==` 精确锁定，版本取项目 venv 实际安装值（pip freeze 实测，
+# 与 2026-09-16 全量 18 passed + 1 xfailed 的实测环境一致）。锁定的意义：
+# 1) CI / Docker 不再因某依赖发新版而漂移（可复现构建，是"环境一致性"的硬性要求）；
+# 2) 面试可答"为什么锁版本"：flaky 排查第一步是排除依赖变更。
 
-pytest>=8.0
-playwright>=1.40
-requests>=2.31  # M4：API 层会话客户端（2.34.2 实测通过）
-pymysql>=1.1  # M6：DB 校验层（直查本地 MySQL 验证业务真实落库）
-allure-pytest>=2.13  # M8：Allure 报告（2.16.0 实测通过；HTML 生成需另装 allure CLI）
+pytest==9.1.1
+playwright==1.62.0
+requests==2.34.2  # M4：API 层会话客户端（实测版本）
+pymysql==1.2.0  # M6：DB 校验层（直查本地 MySQL 验证业务真实落库）
+allure-pytest==2.16.0  # M8：Allure 报告（HTML 生成需另装 allure CLI）
