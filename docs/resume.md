@@ -1,8 +1,10 @@
 # 简历材料（M11 交付物）
 
 > 全部数字均有 MODULE_FEEDBACK 验证记录实测支撑，无一行虚构。
-> **红线（Reviewer 反复强调）**：不得写"CI 已跑通"——真实 GitHub Actions 触发
-> 仍 UNVERIFIED，只能写"workflow 已就绪（真实触发待上仓）"。
+> **红线更新（2026-09-17）**：CI **已真实跑通** —— GitHub Actions run `35199658118`
+> （commit `100e3f2`）全绿、1m59s，起服务 / 安装 / 构建 / API / UI / e2e 全部 success，
+> Allure 结果已实际上传。**现在可以写"CI 已跑通"**。仍不得写覆盖率、缺陷单数等
+> 无实测依据的数字。
 > 速差口径（M11 收口审查 P1-1）：只说"同环境对比"，禁止跨环境取最差/最优单点。
 
 ## 简历 bullet（4 条主 + 1 条缺陷发现补充）
@@ -19,7 +21,7 @@
 4. **CI/CD 与容器化**—— 分层 CI workflow（API 先跑快反馈，任一层红即红）＋ 测试
    执行环境 Docker 化（一套 compose 命令容器内全量 18 passed）；flake 度量脚本
    量化公网稳定性（同命令 ×N 可复跑，3/3 记录在案）；浏览器路径走代码级配置根治。
-   ⚠️ 真实 GitHub Actions 触发待上仓验证（当前如实标注 workflow 已就绪）。
+   ✅ 真实 GitHub Actions 已跑通（run 35199658118 全绿 / 1m59s / 2026-09-17）。
 5. **缺陷发现闭环（测试岗最值钱的点）**—— 通过跨层对比发现被测系统真实行为：
    ① API 创建的员工 employee_id 为 NULL（显示编号不走创建路径）；② API 删除后
    DB 行**物理消失**（purged_at 软删字段未启用，硬删 vs 软删仅查库可区分）；
@@ -52,7 +54,7 @@ Docker 化测试环境。
 - [ ] 1min 版三个证据数字脱口而出
 - [ ] 3min 版故事讲得自然（不背稿）
 - [ ] 被问"11 倍速差"能纠正为"4~9 倍、同环境、视时段用例集"
-- [ ] 被问"CI 跑过几次"能诚实回答"真实触发待上仓，workflow 已就绪"
+- [ ] 被问"CI 跑过几次"能答"GitHub Actions 已跑通：前 3 次暴露真实缺陷并修掉，第 4 次全绿（run 35199658118 / 1m59s）"
 
 ---
 
@@ -66,5 +68,5 @@ Docker 化测试环境。
 · 失败自动留痕（截图 / Trace / netlog / API 日志）覆盖四层、成功零产物，集成 Allure
 · 稳定性治理：断言超时统一、goto 重试 + 可观测计数、环境门控、关闭 requests 代理继承
 · compose 一键起被测系统与测试容器；分层 workflow（API 先跑）+ flake 度量脚本
-**成果**：公网 16 passed + 3 skipped / 85s，本地 18 passed + 1 xfailed（快 4~9 倍）；DB 171 表只读校验。CI 仅就绪，未真实触发。
+**成果**：公网 16 passed + 3 skipped / 85s，本地 18 passed + 1 xfailed（快 4~9 倍）；DB 171 表只读校验；**GitHub Actions 分层 CI 已跑通（全绿 1m59s）**。
 **链接**：https://github.com/likui9969-alt/web-automation

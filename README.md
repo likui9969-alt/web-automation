@@ -16,11 +16,11 @@ UI 自动化（Playwright）+ API 自动化（Requests）+ 分层测试设计 + 
 - [x] M6：本地 Docker 部署（OrangeHRM 5.9 + MySQL 8.0，无人值守安装器）+ DB 持久化校验层（pymysql 只读、ohrm_ro 最小权限账号、环境门控 skip）。**本地全量 18 条通过**（本地确定性环境比公网 Demo 快约 4~9 倍，视用例集与时段；同套口径审查方复测 ~7.7 倍）；两次真实排障（解释器错位 → 项目 venv；localhost cookie domain 陷阱 → domain 取 BASE_URL host）。**历经两轮独立复审，P1 全清零后 APPROVED_WITH_FIXES → M6 关闭**（历史：M6 原 APPROVED 曾因审查节由实现方代笔被所有者作废，沉淀为 AGENTS §13.1 制度）
 - [x] M7：失败定位体系（失败自动留痕四件套：截图 / Playwright Trace / 浏览器 netlog / API 请求日志；成功零产物；skip/xfail 不误记）。**审查方独立实测闭环 → APPROVED**
 - [x] M8：Allure 报告（feature 4 组 / title / severity / attachment 失败截图进报告）。**审查方实测 attachment 链路有效 → APPROVED**
-- [x] M9：GitHub Actions 分层 CI（API → UI → e2e，`if: always()` 防吞层）+ flake 度量脚本（ps1 + bash 双平台）+ 浏览器路径代码级根治。**代码/配置层面审查闭环 → APPROVED_WITH_FIXES；唯一剩余 = 真实 Actions 触发（UNVERIFIED，未宣称跑通，需上仓后闭环）**
-- [x] M10：测试执行环境 Docker 化（Dockerfile + compose test 服务，容器内全量 18 passed + 1 xfailed 实测；E1–E6 不利条件验证：失败留痕/CWD 兜底/门控识别/零留痕）。**已提交，待独立复审**
+- [x] M9：GitHub Actions 分层 CI（API → UI → e2e，`if: always()` 防吞层）+ flake 度量脚本（ps1 + bash 双平台）+ 浏览器路径代码级根治。**代码/配置层面审查闭环 → APPROVED_WITH_FIXES；真实 Actions 已于 2026-09-17 跑通（run 35199658118 全绿 / 1m59s：起服务 30s / 安装 31s / 构建镜像 34s / API 5s / UI 7s / e2e 6s，Allure 结果已上传）**
+- [x] M10：测试执行环境 Docker 化（Dockerfile + compose test 服务，容器内全量 18 passed + 1 xfailed 实测；E1–E6 不利条件验证：失败留痕/CWD 兜底/门控识别/零留痕）。**已提交，待独立复审。⚠️ 边界：该结论在 Windows Docker Desktop 上取得，其 bind mount 不校验 Linux uid → 不覆盖 Linux runner（该差异已被 CI 第 3 次失败实证并修复）**
 - [x] M11：复盘交付物（真实数据统计 / 简历 bullet / 三档项目介绍 / 八问答话术见 docs/）。**按全局收口审查整改中**
 
-> **状态说明**：当前多数模块已 APPROVED；M9 真实 GitHub Actions 触发、M10 独立复审为开放项（见 MODULE_FEEDBACK 状态表与 REVIEW_FEEDBACK）。**公开仓库/简历中不得写"CI 已跑通"**——只能写"workflow 已就绪（真实触发待上仓）"。
+> **状态说明**：当前多数模块已 APPROVED；M10 独立复审为开放项（见 MODULE_FEEDBACK 状态表与 REVIEW_FEEDBACK）。**CI 已于 2026-09-17 真实跑通**（run 35199658118 全绿），"CI 已跑通"现在可以写；但仍不得写覆盖率、缺陷单数等无实测依据的数字。
 
 ## 目录结构与设计理由
 
@@ -164,9 +164,13 @@ Docker**（正式镜像标准内容），仓库内 M6 被测系统 compose（db+
 建只读账号 → 容器内分层跑。**不走公网共享 Demo**（避免环境瞬态打红），
 DB 用例因 `BASE_URL=ohrm-app` 被门控识别为本地，**在 CI 中真实执行**。
 
-> ⚠️ **诚实声明**：容器路径 workflow 尚未在真实 GitHub runner 触发（本地 act 网络
-> 不可达只验证 job 结构）；**在真实 Actions 跑绿前，不得宣称"CI 已跑通"**，
-> 只能写"workflow 已就绪（真实触发待上仓）"。
+> ✅ **实测结论（2026-09-17）**：容器路径 workflow **已在真实 runner 跑通** —— run
+> 35199658118（commit 100e3f2）**全绿 / 1m59s**：起服务 30s、安装 31s、构建镜像 34s、
+> API 5s、UI 7s、e2e 6s 全部 success，Allure 结果已实际上传。
+> 前 3 次触发各暴露一个真实缺陷并已修掉（①`up` 未限定服务 → 连带启动 test 容器使
+> `--wait` 判红；②容器内 `USER tester`（uid 1000）写不了 runner 的 `reports/`（uid 1001）
+> → `--alluredir`/conftest mkdir 在 pytest configure 阶段抛异常 → exit 3 INTERNALERROR；
+> ③CI 缺 README 要求的 DROP 预置库步骤）。**"CI 已跑通"现在可以写。**
 >
 > 历史更正（M11 复审 P1-2）：旧版注释"CI runner 无 Docker daemon"是**错误论据**
 > ——runner 自带 Docker；据此曾把 CI 押在公网 Demo（自身最不稳的目标）的决定
